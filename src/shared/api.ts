@@ -122,6 +122,9 @@ export interface Api {
   'leagues.list': () => LeagueListing[]
   'leagues.inspect': (slug: string) => FolderInspection
   'leagues.create': (input: CreateLeagueInput) => CreateLeagueResult
+  /** Moves a league's folder to _deleted in the data folder (not erased). */
+  'leagues.remove': (slug: string) => { movedTo: string }
+  'leagues.openDeleted': () => void
   'leagues.snapshot': (slug: string) => LeagueSnapshot
   'leagues.exportTemplate': (slug: string, options: { name: string; includePlayers: boolean }) => { path: string }
   /** 리그 설정: which sections can change now (and why not), given awards and cards already handed out. */
@@ -339,6 +342,8 @@ export const API_CHANNELS = [
   'leagues.list',
   'leagues.inspect',
   'leagues.create',
+  'leagues.remove',
+  'leagues.openDeleted',
   'leagues.snapshot',
   'leagues.exportTemplate',
   'leagues.settingsState',
@@ -481,6 +486,8 @@ export type ErrorCode =
   | 'invalid-input'
   | 'invalid-setup'
   | 'league-exists'
+  // A league folder another program holds a file of, so it can't be moved (deleting a league).
+  | 'league-busy'
   | 'not-found'
   | 'file-read'
   | 'bad-template'

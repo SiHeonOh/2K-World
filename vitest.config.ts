@@ -20,5 +20,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // Many tests run whole seasons against a real database: well under a second alone, but past 5 s on a busy machine.
+    testTimeout: 20_000,
   },
 })

@@ -7,7 +7,7 @@
 // of the season in uneven sessions and starts the playoffs (which closes the last session).
 // Run `npm run build` first. Uses a fresh temp data folder.
 import { _electron as electron } from 'playwright-core'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -248,6 +248,24 @@ await step('play the rest in uneven sessions; 플레이오프 시작 closes the 
     300,
   )
   await shot(page, 'pl07-playoffs')
+})
+
+await step('리그 목록: 삭제 asks for the folder name, then moves the league to _deleted', async () => {
+  await page.evaluate(() => void (location.hash = '#/'))
+  const card = page.locator('.card', { has: page.locator(`code:text-is("${slug}")`) })
+  await card.locator('button:has-text("삭제")').click()
+  const confirm = card.locator('button:has-text("리그 삭제")')
+  if (!(await confirm.isDisabled())) throw new Error('리그 삭제 should wait for the folder name')
+  await card.locator('input').fill('wrong')
+  if (!(await confirm.isDisabled())) throw new Error('a wrong name must not enable 리그 삭제')
+  await card.locator('input').fill(slug)
+  await confirm.click()
+  await page.waitForSelector('.notice.ok:has-text("_deleted")')
+  if ((await page.locator(`code:text-is("${slug}")`).count()) !== 0) throw new Error('the deleted league is still listed')
+  if (existsSync(join(dataDir, slug))) throw new Error('the league folder is still in place')
+  const moved = readdirSync(join(dataDir, '_deleted'))
+  if (!moved.some((n) => n.endsWith(`-${slug}`) && existsSync(join(dataDir, '_deleted', n, 'league.sqlite')))) throw new Error(`not in _deleted: ${moved}`)
+  await shot(page, 'pl08-deleted')
 })
 
 await app.close()

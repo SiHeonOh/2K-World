@@ -45,7 +45,7 @@ import { listBackups } from './backup'
 import { AppError } from './errors'
 import { exportLeague } from './exporter'
 import { listLoreSnapshots, loreSnapshotPath, restoreLoreSnapshot } from './loreSnapshots'
-import { isValidSlug } from './leagues'
+import { DELETED_DIR, isValidSlug } from './leagues'
 import { latestScreenshots } from './gameday'
 import { syncLoreFolder } from './lore'
 import { editRoster } from './roster'
@@ -265,6 +265,17 @@ export function createHandlers(deps: HandlerDeps): Handlers {
           'create',
         ) as Parameters<Api['leagues.create']>[0],
       ),
+    'leagues.remove': (slug) => {
+      const s = parse(slugSchema, slug, 'slug')
+      const folder = ctx().leagues.folderOf(s)
+      const result = ctx().leagues.remove(s)
+      forgetLore(folder)
+      return result
+    },
+    'leagues.openDeleted': () => {
+      const dir = join(ctx().dataDir, DELETED_DIR)
+      deps.openFolder(existsSync(dir) ? dir : ctx().dataDir)
+    },
     'leagues.snapshot': (slug) => ctx().leagues.snapshot(parse(slugSchema, slug, 'slug')),
     'leagues.stamp': (slug) => ({ stamp: factsStamp(db(slug)) }),
     'leagues.exportTemplate': (slug, options) =>

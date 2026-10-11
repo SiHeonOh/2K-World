@@ -83,6 +83,16 @@ export const ko = {
     teamsPlayers: (teams: number, players: number) => `${teams}팀 · 선수 ${players}명`,
     dataFolder: '데이터 폴더',
     openFolder: '폴더 열기',
+    remove: '삭제',
+    removeTitle: (name: string) => `'${name}' 리그를 삭제할까요?`,
+    removeHelp:
+      '리그 폴더를 통째로(경기 기록, 로어, 커뮤니티·위키, 백업, 스크린샷) 데이터 폴더 안의 _deleted 폴더로 옮겨요. 지워지지는 않아서, 되돌리려면 그 폴더를 데이터 폴더로 다시 옮기고 이름 앞의 날짜를 빼면 돼요.',
+    removeType: (slug: string) => `확인하려면 폴더 이름 ${slug} 을(를) 입력하세요`,
+    removeConfirm: '리그 삭제',
+    removing: '옮기는 중…',
+    cancel: '취소',
+    removed: (name: string, movedTo: string) => `'${name}' 리그를 ${movedTo} 로 옮겼어요.`,
+    openDeleted: '_deleted 폴더 열기',
   },
 
   appSettings: {
@@ -108,6 +118,7 @@ export const ko = {
       'invalid-input': '잘못된 요청이에요.',
       'invalid-setup': '설정에 고쳐야 할 부분이 있어요.',
       'league-exists': '그 폴더에는 이미 리그가 있어요.',
+      'league-busy': '다른 프로그램(옵시디언, 탐색기, 엑셀 등)이 이 리그 폴더의 파일을 열고 있어서 옮기지 못했어요. 그 프로그램을 닫고 다시 해 보세요. 리그는 그대로예요.',
       'not-found': '찾을 수 없어요.',
       'file-read': '파일을 읽을 수 없어요.',
       'bad-template': '템플릿 파일이 올바르지 않아요.',

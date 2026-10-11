@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { CreateLeagueInput, CreateLeagueResult } from '@shared/api'
 import {
@@ -24,6 +24,20 @@ import { followSchoolNames, formerSchoolNames } from './leagueSettings'
 import { snapshotLore } from './loreSnapshots'
 
 const DB_FILE = 'league.sqlite'
+
+/** Deleted leagues are moved here, inside the data folder. Its leading _ keeps it off the league list. */
+export const DELETED_DIR = '_deleted'
+
+/** A pause for a retry, in a step that must stay synchronous (it runs inside one IPC call). */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/** This PC's time as a folder-safe stamp: 2026-10-11_231502. */
+function localStamp(at = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}_${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`
+}
 
 /** Steps that also snapshot the lore folder (the first open of a day does too). */
 const LORE_POINTS = new Set(['manual', 'season-start'])
@@ -276,6 +290,49 @@ export class LeagueService {
     } finally {
       removeQuietly(staged)
     }
+  }
+
+  /**
+   * Deletes a league by moving its whole folder (database, lore, backups,
+   * screenshots, exports) to `_deleted/<time>-<folder>` in the data folder,
+   * so it can be put back by moving it out again. An open league closes first,
+   * as on a league switch (its AI queue stops). A folder another program holds
+   * a file of (Obsidian, Explorer, Excel) is refused and left as it was.
+   */
+  remove(slug: string): { movedTo: string } {
+    const onDisk = existsSync(this.dataDir) ? (readdirSync(this.dataDir).find((n) => slugKey(n) === slugKey(slug)) ?? null) : null
+    if (onDisk === null) throw new AppError('not-found', `${slug} has no league folder`)
+    const folder = this.folder(onDisk)
+    if (!statSync(folder).isDirectory()) throw new AppError('not-found', `${slug} is not a folder`)
+    if (this.isActive(onDisk)) this.closeAll()
+    const trash = join(this.dataDir, DELETED_DIR)
+    mkdirSync(trash, { recursive: true })
+    let name = `${localStamp()}-${onDisk}`
+    for (let n = 2; existsSync(join(trash, name)); n++) name = `${localStamp()}-${onDisk}-${n}`
+    // Windows can hold a just-closed file for a moment (antivirus, the indexer): a few tries before giving up.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameSync(folder, join(trash, name))
+        break
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        if ((code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') && attempt < 5) {
+          pause(200)
+          continue
+        }
+        if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') throw new AppError('league-busy', `${onDisk} is in use: ${(e as Error).message}`)
+        throw e
+      }
+    }
+    this.backedUp.delete(slugKey(onDisk))
+    try {
+      this.settings.update((s) => {
+        if (s.lastLeague !== null && slugKey(s.lastLeague) === slugKey(onDisk)) s.lastLeague = null
+      })
+    } catch (e) {
+      console.warn('[leagues] settings update after a delete failed', e)
+    }
+    return { movedTo: `${DELETED_DIR}/${name}` }
   }
 
   closeAll(): void {
