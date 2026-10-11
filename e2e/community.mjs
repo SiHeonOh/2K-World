@@ -281,8 +281,12 @@ await step('a narrow window keeps titles readable', async () => {
   await page.setViewportSize({ width: 1100, height: 700 })
   await page.click('.cm-board >> nth=0')
   await page.waitForSelector('.cm-table')
-  const width = await page.locator('.cm-table th.title').evaluate((el) => el.getBoundingClientRect().width)
-  if (width < 300) throw new Error(`title column only ${Math.round(width)}px wide`)
+  // Measured once the list has settled: the board's click redraws it, and a row being replaced measures 0.
+  let width = 0
+  const titleWidth = () => page.evaluate(() => document.querySelector('.cm-table th.title')?.getBoundingClientRect().width ?? 0)
+  await until('the title column to settle at 300px or more', async () => (width = await titleWidth()) >= 300, 25).catch(() => {
+    throw new Error(`title column only ${Math.round(width)}px wide`)
+  })
   await shot('cm06-narrow')
   await page.setViewportSize({ width: 1440, height: 920 })
 })
