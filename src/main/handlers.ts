@@ -68,7 +68,7 @@ export interface HandlerDeps {
 type Handler<K extends ApiChannel> = (...args: unknown[]) => ReturnType<Api[K]> | Promise<ReturnType<Api[K]>>
 export type Handlers = { [K in ApiChannel]: Handler<K> }
 
-/** Roster edits: the engine checks every value against the league's rules (ranges, grades, names). */
+/** Roster edits: the engine checks every value against the league's rules (ranges, grades, names, slots). */
 const rosterEditsSchema = z
   .array(
     z.object({
@@ -78,6 +78,7 @@ const rosterEditsSchema = z
       nicknames: z.array(z.string().max(200)).max(50).optional(),
       notes: z.string().max(10_000).optional(),
       ratings: z.record(z.string().max(64), z.union([z.number(), z.string().max(10), z.null()])).optional(),
+      slotId: z.string().min(1).max(64).nullable().optional(),
     }),
   )
   .max(1000)
@@ -867,6 +868,8 @@ export const STORY_TRIGGERS: readonly ApiChannel[] = [
   'draft.finish',
   'awards.give',
   'awards.remove',
+  // A starter sent to the bench (or the reverse) in 로스터 편집 moves moods and is news.
+  'roster.update',
   'gameday.confirm',
   // An approved secret reveal is news (secret_revealed).
   'suggestions.approve',

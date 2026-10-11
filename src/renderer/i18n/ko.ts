@@ -895,7 +895,9 @@ export const ko = {
 
   roster: {
     title: '로스터 편집',
-    intro: '이름, 키, 능력치, 별명, 메모를 표에서 바로 고쳐요. Enter나 ↑/↓로 위아래 선수로 움직여요. 저장하기 전에 리그 백업을 남겨요.',
+    intro: '포지션(슬롯), 이름, 키, 능력치, 별명, 메모를 표에서 바로 고쳐요. Enter나 ↑/↓로 위아래 선수로 움직여요. 저장하기 전에 리그 백업을 남겨요.',
+    slotHelp: '2K에서 라인업을 바꿨다면 여기서 슬롯을 맞춰 주세요. 두 선수를 바꾸려면 둘 다 바꾼 뒤 저장해요.',
+    slotsLocked: '드래프트 중에는 슬롯을 바꿀 수 없어요. 드래프트 스왑이 슬롯을 기준으로 움직여요.',
     nav: '로스터 편집',
     school: '학교',
     allSchools: '모든 학교',
@@ -920,6 +922,7 @@ export const ko = {
     discard: '되돌리기',
     confirmDiscard: (n: number) => `저장하지 않은 ${n}명의 변경을 모두 버릴까요?`,
     blocked: '빨간 칸을 고쳐야 저장할 수 있어요.',
+    slotIssues: '슬롯이 맞지 않는 학교',
     noMatch: '찾는 선수가 없어요.',
     problems: {
       nameEmpty: '이름을 비울 수 없어요',
@@ -1028,6 +1031,10 @@ export const ko = {
     'roster-name-reserved': (p: P) => `${p.player}: '${p.name}'은(는) 학교나 단장 이름이라 선수 이름으로 쓸 수 없어요`,
     'roster-duplicate-edit': (p: P) => `${p.player}의 변경이 두 번 들어왔어요. 다시 시도해 주세요`,
     'roster-lore-taken': (p: P) => `'${p.name}'(으)로 바꾸면 로어 파일이 ${p.file} 자리에 가야 하는데, 그 파일이 이미 있어요. 그 파일을 정리한 뒤 다시 저장해 주세요`,
+    'roster-slot-empty': (p: P) => `${p.team}: ${p.slot} 자리가 비어요. 그 자리로 갈 선수의 슬롯도 바꿔 주세요`,
+    'roster-slot-doubled': (p: P) => `${p.team}: ${p.slot} 자리에 ${p.count}명이 돼요. 한 자리에는 한 명만 둘 수 있어요`,
+    'roster-slot-unknown': (p: P) => `${p.player}: 리그에 없는 슬롯이에요 (${p.slot})`,
+    'roster-slot-draft': () => '드래프트 중에는 슬롯을 바꿀 수 없어요. 드래프트 스왑이 슬롯을 기준으로 움직여요. 드래프트가 끝난 뒤에 바꿔 주세요',
     'player-count-mismatch': (p: P) => `주고받는 선수 수가 같아야 해요 (${p.a} : ${p.b})`,
     'cards-with-players': () => '이 리그는 선수 트레이드에 카드를 얹을 수 없어요',
     'card-trades-disabled': () => '이 리그는 카드 트레이드를 쓰지 않아요',
@@ -1044,6 +1051,7 @@ export const ko = {
     'already-in-2k': () => '이미 2K에 적용한 이동은 거부할 수 없어요',
     'moved-since': () => '그 뒤에 선수나 카드가 다시 움직여서(갔다가 돌아온 경우도) 되돌릴 수 없어요. 뒤의 이동부터 되돌리세요',
     'veto-protected': () => '이 트레이드로 옮긴 선수를 새 팀이 드래프트 보호 선수로 지정해서 되돌릴 수 없어요',
+    'veto-slot-changed': () => '이 트레이드로 옮긴 선수의 슬롯을 그 뒤 로스터 편집에서 바꿔서 되돌릴 수 없어요. 슬롯을 트레이드 때대로 돌려 놓으면 되돌릴 수 있어요',
     'unknown-checklist': () => '항목을 찾을 수 없어요',
     'no-card-draft': () => '이 리그는 카드 스왑 드래프트를 쓰지 않아요',
     'no-cards-left': () => '그 팀에 남은 카드가 없어요',

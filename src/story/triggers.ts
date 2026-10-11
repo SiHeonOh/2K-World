@@ -1,10 +1,11 @@
-import type { EventType, LeagueEvent } from '@shared/events'
+import type { EventPayloads, EventType, LeagueEvent } from '@shared/events'
 
 /**
  * Which story jobs new league events call for. Every recorded game gets its
- * own thread; awards and draft moves that land together share one; trades,
- * series results, seeding, the season start, your news and each secret you
- * approved as revealed get one each.
+ * own thread; awards and draft moves that land together share one, as do
+ * mood swings and the lineup changes behind them; trades, series results,
+ * seeding, the season start, your news and each secret you approved as
+ * revealed get one each.
  */
 
 export type Reaction =
@@ -22,6 +23,8 @@ const BATCHED: Partial<Record<EventType, string>> = {
   draft_swap: 'draft',
   draft_pass: 'draft',
   mood_changed: 'moods',
+  // A starter sent to the bench (or brought in from it) shares a thread with the moods it stirs.
+  slots_changed: 'moods',
   // Clinches, eliminations, a new #1 and streaks after one look share a thread.
   standings_moment: 'standings',
   wanting_out: 'moods',
@@ -59,6 +62,8 @@ export function planReactions(events: LeagueEvent[]): Reaction[] {
       else unrecorded.set(id, e)
     } else if (OWN_THREAD.includes(e.type)) {
       out.push({ kind: 'event_thread', events: [e] })
+    } else if (e.type === 'slots_changed' && !(e.payload as EventPayloads['slots_changed']).rotation) {
+      // A PG becoming the SG is bookkeeping: only a move between the starters and the bench is news.
     } else if (BATCHED[e.type]) {
       const key = BATCHED[e.type]!
       if (!groups.has(key)) groups.set(key, [])

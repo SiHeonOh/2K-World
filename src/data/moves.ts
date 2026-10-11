@@ -189,13 +189,24 @@ export function vetoTrade(db: Db, tradeId: number): void {
   const season = currentSeason(db)
   if (!item && (trade.season_id !== season.id || trade.phase !== season.phase)) refuse('veto-window-closed')
   const items = db
-    .prepare('SELECT kind, from_team_id, to_team_id, player_id, card_id, from_slot_id FROM trade_items WHERE trade_id = ?')
-    .all(tradeId) as { kind: string; from_team_id: string; to_team_id: string; player_id: string | null; card_id: number | null; from_slot_id: string | null }[]
+    .prepare('SELECT kind, from_team_id, to_team_id, player_id, card_id, from_slot_id, to_slot_id FROM trade_items WHERE trade_id = ?')
+    .all(tradeId) as {
+    kind: string
+    from_team_id: string
+    to_team_id: string
+    player_id: string | null
+    card_id: number | null
+    from_slot_id: string | null
+    to_slot_id: string | null
+  }[]
   // Only reversible while nothing has moved since.
   for (const i of items) {
     if (i.kind === 'player') {
-      const p = db.prepare('SELECT team_id FROM players WHERE id = ?').get(i.player_id) as { team_id: string }
+      const p = db.prepare('SELECT team_id, slot_id FROM players WHERE id = ?').get(i.player_id) as { team_id: string; slot_id: string | null }
       if (p.team_id !== i.to_team_id) refuse('moved-since', { player: i.player_id! })
+      // …nor moved to another slot in 로스터 편집: his team's lineup was rearranged around him, so the
+      // players coming back to their old slots would leave one slot empty and another doubled.
+      if (p.slot_id !== i.to_slot_id) refuse('veto-slot-changed', { player: i.player_id! })
     } else {
       const c = db.prepare('SELECT owner_team_id, status FROM cards WHERE id = ?').get(i.card_id) as { owner_team_id: string; status: string }
       if (c.owner_team_id !== i.to_team_id || c.status !== 'held') refuse('moved-since', { card: i.card_id! })

@@ -60,7 +60,7 @@ import { playerState } from '@story/playerState'
 import { getGame } from '@data/season'
 import { roundComplete } from '@data/schedule'
 import { announceStandingsMoments } from '@data/moments'
-import type { LeagueEvent } from '@shared/events'
+import type { EventPayloads, LeagueEvent } from '@shared/events'
 import { STORY_KINDS, STORY_PRIORITY, type StoryInput, type StoryKind } from '@story/jobs'
 import { planReactions } from '@story/triggers'
 import {
@@ -476,6 +476,11 @@ export class StoryService {
       }
       if (e.type === 'trade_applied') x.teams?.forEach((t) => teams.add(t))
       if (e.type === 'draft_swap') [x.teamId, x.targetTeamId].forEach((t) => t && teams.add(t))
+      // A lineup change moves moods only when someone went between the starters and the bench (his role).
+      if (e.type === 'slots_changed') {
+        const s = e.payload as EventPayloads['slots_changed']
+        if (s.rotation) teams.add(s.teamId)
+      }
     }
     if (teams.size === 0) return
     try {

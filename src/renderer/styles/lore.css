@@ -1122,6 +1122,12 @@
 .roster-grid select.grade {
   width: 58px;
 }
+.roster-grid select.slot {
+  width: 92px;
+}
+.roster-slot-issues .issues {
+  margin: 6px 0 0;
+}
 .roster-grid td.bad input,
 .roster-grid td.bad select {
   border-color: var(--err);

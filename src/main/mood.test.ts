@@ -6,6 +6,8 @@ import { sampleSetup } from '@shared/testing/fixtures'
 import { openDb, type Db } from '@data/db'
 import { listEvents, listPlayers, listTeams, seedLeague } from '@data/league'
 import { applyTrade, giveAward } from '@data/moves'
+import { updatePlayers } from '@data/roster'
+import { DEFAULT_TRAITS } from '@core/mood'
 import { listGames, recordScore, startSeason } from '@data/season'
 import { readLeague } from '@story/context'
 import { lockerRoom, relationTarget, snapshotMoods } from '@story/mood'
@@ -98,6 +100,34 @@ describe('locker room', () => {
     const before = rivalryOf()
     giveAward(db, { awardId: 'mvp', period: '', teamRank: 1, playerId: rival.id })
     expect(rivalryOf()).toBe(Math.max(-100, before - 40))
+  })
+
+  it('a starter sent to the bench in 로스터 편집 is demoted: a benched starter’s role, and his `benched` rule fires', () => {
+    startSeason(db)
+    const team = listTeams(db)[0]!
+    // p5 (C, OVR 74) is the second best, so he expects to start; p6 (Bench, OVR 75) is the best.
+    const [c, bench] = ['p5', 'p6'].map((id) => listPlayers(db).find((p) => p.id === id)!)
+    mkdirSync(join(dir, 'lore', 'teams', team.shortName), { recursive: true })
+    writeFileSync(join(dir, 'lore', 'teams', team.shortName, `${c!.name}.md`), `---\nid: ${c!.name}\nhooks:\n  - when: benched\n    mood: { recognition: -30 }\n---\n`)
+    const moodOf = (id: string) => lockerRoom(readLeague(db, dir), team.id).players.find((p) => p.playerId === id)!
+    const before = moodOf(c!.id)
+    expect(before).toMatchObject({ slot: 'C', parts: { role: 35, recognition: 0 } })
+    const benchedBefore = moodOf(bench!.id).parts.role
+    expect(benchedBefore).toBe(-30 - 12 * DEFAULT_TRAITS.ego)
+
+    updatePlayers(db, [
+      { playerId: c!.id, slotId: 'bench' },
+      { playerId: bench!.id, slotId: 'c' },
+    ])
+    const after = moodOf(c!.id)
+    // What any player in a bench slot who expects to start feels (as the best player did there before),
+    // and his lore's `benched` rule fires.
+    expect(after.slot).toBe('Bench')
+    expect(after.parts.role).toBe(benchedBefore)
+    expect(after.parts.recognition).toBe(-30)
+    expect(after.overall).toBeLessThan(before.overall)
+    // The best player starts now, as he expected to.
+    expect(moodOf(bench!.id).parts.role).toBe(35)
   })
 
   it('records a band change as an event the community reacts to', () => {

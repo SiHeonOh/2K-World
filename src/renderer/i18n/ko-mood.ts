@@ -65,6 +65,7 @@ export const moodText = {
     requestHelp: '트레이드 요청은 그 학교에 있는 동안, 다음 트레이드 창이 열렸다 닫힐 때까지 이어져요. 기분이 풀려도 끝나요.',
     trade: (from: string, to: string) => `트레이드: ${from} → ${to}`,
     draft: (from: string, to: string) => `드래프트: ${from} → ${to}`,
+    slot: (from: string, to: string, rotation: 'up' | 'down' | null) => `포지션: ${from} → ${to}${rotation ? (rotation === 'up' ? ' (주전으로)' : ' (벤치로)') : ''}`,
     vetoed: '거부권으로 취소',
     award: (name: string, period: string, rank: number) => `수상: ${name}${period ? ` (${period})` : ''}${rank > 1 ? ` ${rank}팀` : ''}`,
     awardRemoved: '취소됨',

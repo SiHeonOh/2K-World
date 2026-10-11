@@ -7,6 +7,7 @@ import type { Db } from '@data/db'
 import { flagsFor, flagsOf } from '@data/flags'
 import { tagUnverified } from '@shared/numbers'
 import { playedMode, roundLabel } from '@shared/played'
+import { rotationMove } from '@shared/roster'
 import { currentSeason, listPlayers, listTeams, loadConfig } from '@data/league'
 import { pollView } from '@data/polls'
 import { boxLines, getGame, listGames, standings } from '@data/season'
@@ -411,6 +412,16 @@ export function describeEvent(league: League, e: LeagueEvent): { text: string; t
         players: [id],
         role: 'trades',
       }
+    }
+    case 'slots_changed': {
+      // Only starters ↔ bench is news; a PG becoming the SG isn't.
+      const x = p as EventPayloads['slots_changed']
+      const slotName = (id: string | null) => league.config.roster.slots.find((s) => s.id === id)?.name ?? '–'
+      const moved = x.changes.map((c) => ({ ...c, move: rotationMove(league.config.roster, c.from, c.to) })).filter((c) => c.move !== null)
+      if (moved.length === 0) return null
+      const line = (c: (typeof moved)[number]) =>
+        `${playerName(league, c.playerId)} ${c.move === 'up' ? '벤치 → 주전' : '주전 → 벤치'} (${slotName(c.from)} → ${slotName(c.to)})`
+      return { text: `라인업 변경: ${short(league, x.teamId)} — ${moved.map(line).join(', ')}`, teams: [x.teamId], players: moved.map((c) => c.playerId), role: 'main' }
     }
     case 'standings_moment': {
       const m = p as EventPayloads['standings_moment']

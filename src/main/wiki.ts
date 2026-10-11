@@ -1,5 +1,7 @@
 import type { LeagueConfig, WikiConfig } from '@shared/config/schema'
+import type { EventPayloads } from '@shared/events'
 import { parseWiki } from '@shared/namumark'
+import { rotationMove } from '@shared/roster'
 import type {
   HistoryItem,
   Infobox,
@@ -354,7 +356,7 @@ export class WikiService {
     }
   }
 
-  /** A player's season: trades, draft moves, awards and big games, oldest first. */
+  /** A player's season: trades, draft moves, going between the starters and the bench, awards and big games, oldest first. */
   private playerHistory(db: Db, ctx: Ctx, p: PlayerRow): HistoryItem[] {
     const out: HistoryItem[] = []
     const season = (id: number | null) => (id === null ? '' : (ctx.seasonLabels.get(id) ?? ''))
@@ -370,6 +372,12 @@ export class WikiService {
       } else if (e.type === 'draft_swap' && (x.playerId === p.id || x.targetPlayerId === p.id)) {
         const to = x.playerId === p.id ? (x.targetTeamId as string) : (x.teamId as string)
         out.push({ at: e.createdAt, season: season(e.seasonId), text: `드래프트 스왑으로 ${this.teamName(ctx, to)} 이적` })
+      } else if (e.type === 'slots_changed') {
+        // Only going between the starters and the bench: the position itself is in the infobox.
+        const c = (x.changes as EventPayloads['slots_changed']['changes']).find((y) => y.playerId === p.id)
+        const move = c ? rotationMove(ctx.config.roster, c.from, c.to) : null
+        const slot = (id: string | null) => ctx.config.roster.slots.find((s) => s.id === id)?.name ?? '–'
+        if (c && move) out.push({ at: e.createdAt, season: season(e.seasonId), text: `${move === 'up' ? '주전 발탁' : '벤치로 이동'} (${slot(c.from)} → ${slot(c.to)})` })
       }
     }
     const points = ctx.config.stats.columns.find((c) => c.meaning === 'points')?.id

@@ -1,4 +1,5 @@
 import type { LeagueConfig, Phase, TeamControl } from '@shared/config/schema'
+import { rosterProblems } from '@shared/roster'
 import type { TradeCheck, TradeIssue, TradeIssueCode, TradeItem } from '@shared/season'
 
 export type { TradeCheck, TradeIssue, TradeIssueCode, TradeItem }
@@ -178,17 +179,10 @@ export function checkTrade(items: readonly TradeItem[], ctx: TradeContext): Trad
     list.push(m ? m.toSlotId : p.slotId)
     after.set(team, list)
   }
-  const { roster } = config
   for (const team of [a, b]) {
-    const list = after.get(team) ?? []
-    if (list.length < roster.minPlayers || list.length > roster.maxPlayers) {
-      add('roster-size', { team, count: list.length })
-    }
-    if (roster.slotMode === 'one-per-slot') {
-      for (const s of roster.slots) {
-        const n = list.filter((x) => x === s.id).length
-        if (n !== 1) add('roster-slot', { team, slot: s.name, count: n })
-      }
+    for (const p of rosterProblems(config.roster, after.get(team) ?? [])) {
+      if (p.kind === 'size') add('roster-size', { team, count: p.count })
+      else add('roster-slot', { team, slot: p.slot, count: p.count })
     }
   }
   return { ok: issues.length === 0, issues, moves: issues.length === 0 ? moves : [] }

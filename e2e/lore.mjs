@@ -295,6 +295,35 @@ await step('edit roster facts in a table, and rename a player whose lore follows
   if (!readFileSync(join(loreDir, 'teams', mateSchool, '새이름.md'), 'utf8').includes(`id: ${mate.name}`)) throw new Error('lore file not renamed')
 })
 
+await step('swap two teammates’ slots in the table; a half-done swap shows its issue and waits', async () => {
+  const now = await invoke('leagues.snapshot', slug)
+  // The school's last starter and its bench player trade places, as after a lineup change in 2K.
+  const starter = now.config.roster.slots.filter((s) => s.starter).at(-1)
+  const bench = now.config.roster.slots.find((s) => !s.starter)
+  const mates = now.players.filter((p) => p.teamId === team.id)
+  const a = mates.find((p) => p.slotId === starter.id)
+  const b = mates.find((p) => p.slotId === bench.id)
+  await page.selectOption('select[aria-label="학교"]', team.id)
+  await page.waitForSelector('text=2K에서 라인업을 바꿨다면 여기서 슬롯을 맞춰 주세요')
+  // Half done: the starter goes to the bench and nobody takes his place yet.
+  await page.selectOption(`select[aria-label="${a.name} 포지션"]`, bench.id)
+  await page.waitForSelector(`.roster-slot-issues >> text=${team.shortName}: ${starter.name} 자리가 비어요`)
+  await page.waitForSelector(`.roster-slot-issues >> text=${team.shortName}: ${bench.name} 자리에 2명이 돼요`)
+  await page.waitForSelector(`.roster-grid td.bad select[aria-label="${a.name} 포지션"]`)
+  await page.waitForSelector('text=빨간 칸을 고쳐야 저장할 수 있어요')
+  if (await page.isEnabled('.lore-table-head button:has-text("1명 저장")')) throw new Error('a half-done swap could be saved')
+  await shot('lo14-roster-half-swap')
+  // The other half: the issue goes, and both save together.
+  await page.selectOption(`select[aria-label="${b.name} 포지션"]`, starter.id)
+  await page.waitForSelector('.roster-slot-issues', { state: 'detached' })
+  await page.click('.lore-table-head button:has-text("2명 저장")')
+  await page.waitForSelector('text=2명을 저장했어요')
+  await shot('lo15-roster-swapped')
+  const after = await invoke('leagues.snapshot', slug)
+  const slotOf = (p) => after.players.find((x) => x.id === p.id).slotId
+  if (slotOf(a) !== bench.id || slotOf(b) !== starter.id) throw new Error(`slots not swapped: ${a.name} ${slotOf(a)}, ${b.name} ${slotOf(b)}`)
+})
+
 await step('start a world topic', async () => {
   await page.click('.nav a:has-text("로어")')
   await page.waitForSelector('.lore-list')

@@ -6,6 +6,7 @@ import { type ModelName, aiFor, type EffortLevel } from '@shared/config/schema'
 import type { EventPayloads, EventType, LeagueEvent } from '@shared/events'
 import type { PlayerFeelingsView } from '@shared/mood'
 import { PLAYER_TRAITS } from '@shared/lore'
+import { rotationMove } from '@shared/roster'
 import { jsonField, transaction, type Db } from '@data/db'
 import { appendEvent, currentSeason, listPlayers } from '@data/league'
 import { standings } from '@data/season'
@@ -156,6 +157,16 @@ export function reactionPicks(league: League, events: LeagueEvent[], limit = PER
       // Season awards only; weekly and monthly ones come too often to each get a quote.
       const name = awards.find((a) => a.id === x.awardId)?.name ?? (x.awardId as string)
       add(x.playerId as string, `${name}${(x.teamRank as number) > 1 ? ` ${x.teamRank as number}팀` : ''} 수상`, 2.5)
+    }
+  }
+  // Going between the starters and the bench gets nobody talking by itself: it's what a mood swing above was about.
+  for (const e of events) {
+    if (e.type !== 'slots_changed') continue
+    for (const c of (e.payload as EventPayloads['slots_changed']).changes) {
+      const move = rotationMove(league.config.roster, c.from, c.to)
+      const p = picks.get(c.playerId)
+      const cause = move === 'down' ? '주전에서 벤치로 밀려남' : '벤치에서 주전으로 올라섬'
+      if (move && p && !p.causes.includes(cause)) p.causes.push(cause)
     }
   }
   return [...picks.values()]

@@ -3,13 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
-import { lastEventId, setStoryValue } from '@data/community'
+import { lastEventId, lastNewsEventId, setStoryValue } from '@data/community'
 import { openDb, type Db } from '@data/db'
-import { appendEvent, currentSeason, listEvents, seedLeague } from '@data/league'
+import { appendEvent, currentSeason, listEvents, listPlayers, seedLeague } from '@data/league'
 import { applyTrade, vetoTrade } from '@data/moves'
+import { updatePlayers } from '@data/roster'
 import { startSeason } from '@data/season'
 import { intentInput, readMarket } from '@sim/gm'
 import { readLeague } from '@story/context'
+import { snapshotMoods } from '@story/mood'
 import { playerState } from '@story/playerState'
 import { storyDemo, storyKinds } from '@story/jobs'
 import {
@@ -232,6 +234,46 @@ describe('player reactions (demo writer)', () => {
     for (const t of jobs('event_thread')) expect(t.input).not.toContain(SECRET)
     const room = (await import('@story/mood')).lockerRoom(readLeague(db, dir), 't2')
     expect(room.players.find((p) => p.playerId === 'p1')!.said?.quote).toBeTruthy()
+  })
+
+  it('a starter sent to the bench in 로스터 편집: moods are retaken, and crossing into 불만 is news and gets him talking', () => {
+    // p5 is 가람고's C: proud, and being benched cuts deep.
+    const c = listPlayers(db).find((p) => p.id === 'p5')!
+    writeFileSync(
+      join(dir, 'lore', 'teams', '가람고', `${c.name}.md`),
+      `---\nid: ${c.name}\ntraits:\n  ego: 5\nhooks:\n  - when: benched\n    mood: { recognition: -100, winning: -100 }\n---\n`,
+    )
+    snapshotMoods(readLeague(db, dir), 't1', Date.now())
+    setStoryValue(db, 'events-handled', String(lastEventId(db)))
+    const snapshots = () => (db.prepare("SELECT COUNT(*) AS n FROM player_mood WHERE player_id = 'p5'").get() as { n: number }).n
+    // The PG and the SG trading places moves nobody's role: no snapshot, nothing to write, and the fans' chatter isn't stale.
+    const news = lastNewsEventId(db)
+    updatePlayers(db, [
+      { playerId: 'p1', slotId: 'sg' },
+      { playerId: 'p2', slotId: 'pg' },
+    ])
+    expect(story.afterChange('test', db, dir)).toBe(0)
+    expect(snapshots()).toBe(1)
+    expect(lastNewsEventId(db)).toBe(news)
+
+    updatePlayers(db, [
+      { playerId: 'p5', slotId: 'bench' },
+      { playerId: 'p6', slotId: 'c' },
+    ])
+    expect(lastNewsEventId(db)).toBe(listEvents(db, 'slots_changed').at(-1)!.id)
+    story.afterChange('test', db, dir)
+    expect(snapshots()).toBe(2)
+    expect(listEvents(db, 'mood_changed').map((e) => e.payload)).toEqual([expect.objectContaining({ playerId: 'p5', to: expect.stringMatching(/^(unhappy|boiling)$/) })])
+    // One thread: the lineup change and the mood it stirred.
+    const threads = jobs('event_thread').filter((j) => j.input.includes('라인업 변경'))
+    expect(threads).toHaveLength(1)
+    expect(threads[0]!.input).toContain(`라인업 변경: 가람고 — ${c.name} 주전 → 벤치 (C → Bench)`)
+    expect(threads[0]!.input).toContain('선수 분위기')
+    // His words say why.
+    const words = jobs(PLAYER_REACTION).flatMap((j) => (JSON.parse(j.input) as PlayerReactionInput).players)
+    expect(words.find((p) => p.playerId === 'p5')?.causes).toContain('주전에서 벤치로 밀려남')
+    // His page shows the move.
+    expect(playerState(readLeague(db, dir), 'p5').timeline).toContainEqual(expect.objectContaining({ kind: 'slot', from: 'C', to: 'Bench', rotation: 'down' }))
   })
 
   it('a second look while a reaction job waits joins it instead of adding a job', async () => {

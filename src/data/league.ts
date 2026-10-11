@@ -41,7 +41,7 @@ export function factsStamp(db: Db): number {
   return (
     db
       .prepare(
-        "SELECT COALESCE(MAX(id), 0) AS n FROM events WHERE type IN ('trade_applied', 'move_vetoed', 'draft_swap', 'player_edited', 'config_changed', 'phase_changed', 'season_created', 'teams_edited')",
+        "SELECT COALESCE(MAX(id), 0) AS n FROM events WHERE type IN ('trade_applied', 'move_vetoed', 'draft_swap', 'player_edited', 'slots_changed', 'config_changed', 'phase_changed', 'season_created', 'teams_edited')",
       )
       .get() as { n: number }
   ).n

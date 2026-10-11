@@ -1,4 +1,6 @@
+import type { EventPayloads } from '@shared/events'
 import type { MoodBand, MoodPartName, PlayerStateView, PlayerTimelineItem } from '@shared/mood'
+import { rotationMove } from '@shared/roster'
 import { flagsFor } from '@data/flags'
 import { currentSeason, listPlayers } from '@data/league'
 import { refuse } from '@data/rules'
@@ -45,12 +47,13 @@ export function playerState(league: League, playerId: string, seasonId?: number)
   const events = (
     db
       .prepare(
-        "SELECT id, type, payload, created_at FROM events WHERE season_id = ? AND type IN ('trade_applied', 'draft_swap', 'award_given', 'award_removed', 'mood_changed', 'wanting_out', 'move_vetoed') ORDER BY id",
+        "SELECT id, type, payload, created_at FROM events WHERE season_id = ? AND type IN ('trade_applied', 'draft_swap', 'slots_changed', 'award_given', 'award_removed', 'mood_changed', 'wanting_out', 'move_vetoed') ORDER BY id",
       )
       .all(season) as { id: number; type: string; payload: string; created_at: string }[]
   ).map((e) => ({ ...e, payload: JSON.parse(e.payload) as Record<string, unknown> }))
   const vetoed = new Set(events.filter((e) => e.type === 'move_vetoed').map((e) => `${e.payload.kind as string}:${e.payload.refId as number}`))
   const awardName = new Map([...config.awards.season, ...config.awards.periodic].map((a) => [a.id, a.name]))
+  const slotName = (id: string | null) => config.roster.slots.find((s) => s.id === id)?.name ?? id ?? '–'
   const itemOf = db.prepare("SELECT from_team_id, to_team_id FROM trade_items WHERE trade_id = ? AND kind = 'player' AND player_id = ?")
   const timeline: PlayerTimelineItem[] = []
   for (const e of events) {
@@ -68,6 +71,9 @@ export function playerState(league: League, playerId: string, seasonId?: number)
         to: (sent ? x.targetTeamId : x.teamId) as string,
         vetoed: vetoed.has(`draft-swap:${x.actionId as number}`),
       })
+    } else if (e.type === 'slots_changed') {
+      const c = (x.changes as EventPayloads['slots_changed']['changes']).find((y) => y.playerId === playerId)
+      if (c) timeline.push({ kind: 'slot', at: e.created_at, from: slotName(c.from), to: slotName(c.to), rotation: rotationMove(config.roster, c.from, c.to) })
     } else if (e.type === 'award_given' && x.playerId === playerId) {
       timeline.push({
         kind: 'award',

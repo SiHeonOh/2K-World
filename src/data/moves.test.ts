@@ -24,6 +24,8 @@ import {
   vetoDraftSwap,
   vetoTrade,
 } from './moves'
+import { rosterProblems } from '@shared/roster'
+import { updatePlayers } from './roster'
 import { RuleError } from './rules'
 import { finishPlayoffs, listGames, recordScore, startPlayoffs, startSeason } from './season'
 import { ko } from '../renderer/i18n/ko'
@@ -650,6 +652,79 @@ describe('past seasons, reviewed', () => {
     expect(refusal(() => startNextSeason(db, 'spring league'))).toEqual(['season-label-taken'])
     startNextSeason(db, '시즌 2')
     expect(currentSeason(db).label).toBe('시즌 2')
+  })
+})
+
+// The sample league: 가람고 (t1) is p1 PG, p2 SG, p3 SF, p4 PF, p5 C and p6 Bench; 나람고 (t2) p7…p12; 하람고 (t8) p43…p48.
+describe('slots changed in 로스터 편집', () => {
+  const lineupOk = (db: Db, teamId: string) =>
+    rosterProblems(
+      sampleSetup().config.roster,
+      (db.prepare('SELECT slot_id FROM players WHERE team_id = ?').all(teamId) as { slot_id: string | null }[]).map((r) => r.slot_id),
+    )
+
+  it('a trade goes by the new slots, and a veto waits until his slot is back where the trade put him', () => {
+    const db = league()
+    startSeason(db)
+    updatePlayers(db, [
+      { playerId: 'p5', slotId: 'bench' },
+      { playerId: 'p6', slotId: 'c' },
+    ])
+    // p6 is 가람고's C now: he leaves from there, and 나람고's C takes his place.
+    const tradeId = applyTrade(db, [
+      { kind: 'player', playerId: 'p6', from: 't1', to: 't2' },
+      { kind: 'player', playerId: 'p11', from: 't2', to: 't1' },
+    ])
+    expect(team(db, 'p11')).toEqual({ team_id: 't1', slot_id: 'c' })
+    expect(team(db, 'p6')).toEqual({ team_id: 't2', slot_id: 'c' })
+    expect(listTrades(db, currentSeason(db).id)[0]!.items.find((i) => i.playerId === 'p6')).toMatchObject({ fromSlotId: 'c', toSlotId: 'c' })
+    // A trade that would leave 가람고 with two Cs is still refused.
+    expect(
+      refusal(() =>
+        applyTrade(db, [
+          { kind: 'player', playerId: 'p5', from: 't1', to: 't3' },
+          { kind: 'player', playerId: 'p17', from: 't3', to: 't1', toSlotId: 'c' },
+        ]),
+      ),
+    ).toEqual(['roster-slot', 'roster-slot'])
+
+    // The newcomer and the bench swap: undoing the trade now would leave 가람고 two Cs and no bench.
+    updatePlayers(db, [
+      { playerId: 'p11', slotId: 'bench' },
+      { playerId: 'p5', slotId: 'c' },
+    ])
+    expect(refusal(() => vetoTrade(db, tradeId))).toEqual(['veto-slot-changed'])
+    updatePlayers(db, [
+      { playerId: 'p11', slotId: 'c' },
+      { playerId: 'p5', slotId: 'bench' },
+    ])
+    vetoTrade(db, tradeId)
+    expect(team(db, 'p6')).toEqual({ team_id: 't1', slot_id: 'c' })
+    expect(team(db, 'p11')).toEqual({ team_id: 't2', slot_id: 'c' })
+    expect(lineupOk(db, 't1')).toEqual([])
+    expect(lineupOk(db, 't2')).toEqual([])
+  })
+
+  it('a same-slot draft swap goes by the new slots, and the lineup waits while the draft runs', () => {
+    const db = league((s) => {
+      if (s.config.draft.kind === 'card-swap') s.config.draft.slotRule = 'same-slot'
+    })
+    updatePlayers(db, [
+      { playerId: 'p5', slotId: 'bench' },
+      { playerId: 'p6', slotId: 'c' },
+    ])
+    playSeason(db)
+    expect(refusal(() => updatePlayers(db, [{ playerId: 'p5', slotId: 'c' }, { playerId: 'p6', slotId: 'bench' }]))).toEqual(['roster-slot-draft'])
+    closeProtection(db)
+    const card = draftView(db).next!
+    expect(card.ownerTeamId).toBe('t8')
+    // p6 was the bench player he no longer is: only 하람고's C can be swapped for him.
+    expect(refusal(() => draftMove(db, { kind: 'swap', teamId: 't8', cardId: card.id, playerId: 'p48', targetPlayerId: 'p6' }))).toEqual(['slot-mismatch'])
+    draftMove(db, { kind: 'swap', teamId: 't8', cardId: card.id, playerId: 'p47', targetPlayerId: 'p6' })
+    expect(team(db, 'p6')).toEqual({ team_id: 't8', slot_id: 'c' })
+    expect(team(db, 'p47')).toEqual({ team_id: 't1', slot_id: 'c' })
+    expect(lineupOk(db, 't1')).toEqual([])
+    expect(lineupOk(db, 't8')).toEqual([])
   })
 })
 

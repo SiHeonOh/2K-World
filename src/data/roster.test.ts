@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
+import { ko } from '../renderer/i18n/ko'
 import { openDb, type Db } from './db'
 import { listEvents, listPlayers, listTeams, seedLeague } from './league'
 import { updatePlayers } from './roster'
@@ -86,5 +89,108 @@ describe('roster edits', () => {
     // A name another school's player has is fine (a 동명이인).
     const other = players.find((p) => p.teamId !== a!.teamId)!
     expect(updatePlayers(db, [{ playerId: a!.id, name: other.name }])[0]).toMatchObject({ fields: ['name'], renamedFrom: b!.name })
+  })
+})
+
+// The sample league: 가람고 (t1) is p1 PG, p2 SG, p3 SF, p4 PF, p5 C (starters) and p6 Bench; 나람고 (t2) is p7…p12.
+describe('slot changes', () => {
+  const slots = (db: Db, teamId: string) => Object.fromEntries(listPlayers(db).filter((p) => p.teamId === teamId).map((p) => [p.id, p.slotId]))
+  const issuesOf = (fn: () => unknown) => {
+    try {
+      fn()
+    } catch (e) {
+      if (e instanceof RuleError) return e.issues
+      throw e
+    }
+    return []
+  }
+
+  it('swaps two teammates in one save, with the other edits, and writes one event per team', () => {
+    const db = league()
+    const changes = updatePlayers(db, [
+      { playerId: 'p5', slotId: 'bench', notes: '식스맨으로.' },
+      { playerId: 'p6', slotId: 'c' },
+    ])
+    expect(changes).toEqual([
+      { playerId: 'p5', teamId: 't1', fields: ['notes', 'slot'], renamedFrom: null },
+      { playerId: 'p6', teamId: 't1', fields: ['slot'], renamedFrom: null },
+    ])
+    expect(slots(db, 't1')).toEqual({ p1: 'pg', p2: 'sg', p3: 'sf', p4: 'pf', p5: 'bench', p6: 'c' })
+    expect(listPlayers(db).find((p) => p.id === 'p5')!.notes).toBe('식스맨으로.')
+    // A starter went to the bench: a rotation change.
+    expect(listEvents(db, 'slots_changed').map((e) => e.payload)).toEqual([
+      {
+        teamId: 't1',
+        changes: [
+          { playerId: 'p5', from: 'c', to: 'bench' },
+          { playerId: 'p6', from: 'bench', to: 'c' },
+        ],
+        rotation: true,
+      },
+    ])
+    // The slot has its own event: player_edited names only his other facts.
+    expect(listEvents(db, 'player_edited').map((e) => e.payload)).toEqual([{ playerId: 'p5', teamId: 't1', fields: ['notes'] }])
+
+    // The PG and the SG trading places changes nobody's role; two schools in one save get an event each.
+    updatePlayers(db, [
+      { playerId: 'p1', slotId: 'sg' },
+      { playerId: 'p2', slotId: 'pg' },
+      { playerId: 'p7', slotId: 'sf' },
+      { playerId: 'p9', slotId: 'pg' },
+    ])
+    expect(listEvents(db, 'slots_changed').slice(1).map((e) => e.payload)).toMatchObject([
+      { teamId: 't1', rotation: false },
+      { teamId: 't2', rotation: false },
+    ])
+    expect(slots(db, 't2')).toMatchObject({ p7: 'sf', p9: 'pg' })
+    // A slot sent unchanged isn't a change.
+    expect(updatePlayers(db, [{ playerId: 'p1', slotId: 'sg' }])).toEqual([])
+  })
+
+  it('refuses a half-made swap, naming the school and the slot left empty or doubled, and changes nothing', () => {
+    const db = league()
+    const before = JSON.stringify(listPlayers(db))
+    const issues = issuesOf(() => updatePlayers(db, [{ playerId: 'p5', slotId: 'bench' }]))
+    expect(issues).toEqual([
+      { code: 'roster-slot-empty', params: { team: '가람고', slot: 'C', count: 0 } },
+      { code: 'roster-slot-doubled', params: { team: '가람고', slot: 'Bench', count: 2 } },
+    ])
+    expect(ko.rules['roster-slot-empty']!(issues[0]!.params)).toContain('가람고: C 자리가 비어요')
+    expect(ko.rules['roster-slot-doubled']!(issues[1]!.params)).toContain('가람고: Bench 자리에 2명')
+    // Leaving him without a slot leaves his slot empty too.
+    expect(refusal(() => updatePlayers(db, [{ playerId: 'p5', slotId: null }]))).toEqual(['roster-slot-empty'])
+    // A slot the league doesn't have.
+    expect(refusal(() => updatePlayers(db, [{ playerId: 'p5', slotId: 'center' }]))).toEqual(['roster-slot-unknown'])
+    // Each school is checked on its own: the other half of a swap on another team doesn't fix it.
+    expect(issuesOf(() => updatePlayers(db, [{ playerId: 'p5', slotId: 'bench' }, { playerId: 'p12', slotId: 'c' }])).map((i) => `${i.params.team} ${i.code}`)).toEqual([
+      '가람고 roster-slot-empty',
+      '가람고 roster-slot-doubled',
+      '나람고 roster-slot-doubled',
+      '나람고 roster-slot-empty',
+    ])
+    expect(JSON.stringify(listPlayers(db))).toBe(before)
+    expect(listEvents(db, 'slots_changed')).toHaveLength(0)
+  })
+
+  it('waits for the draft to end, but a frozen school may still change its own lineup', () => {
+    const db = league()
+    const swap = [
+      { playerId: 'p5', slotId: 'bench' },
+      { playerId: 'p6', slotId: 'c' },
+    ]
+    // Frozen means no trades and no draft, not no lineup.
+    db.prepare("UPDATE teams SET control = 'frozen' WHERE id = 't1'").run()
+    expect(updatePlayers(db, swap)).toHaveLength(2)
+    db.prepare("UPDATE seasons SET phase = 'draft'").run()
+    expect(refusal(() => updatePlayers(db, [{ playerId: 'p5', slotId: 'c' }, { playerId: 'p6', slotId: 'bench' }]))).toEqual(['roster-slot-draft'])
+    expect(slots(db, 't1')).toMatchObject({ p5: 'bench', p6: 'c' })
+    // His other facts still change, his own slot sent along with them too.
+    expect(updatePlayers(db, [{ playerId: 'p5', slotId: 'bench', notes: '드래프트 중.' }])).toEqual([{ playerId: 'p5', teamId: 't1', fields: ['notes'], renamedFrom: null }])
+  })
+
+  it('explains every refusal a roster edit can give', () => {
+    const codes = ['roster.ts', '../main/roster.ts'].flatMap((f) => [...readFileSync(join(__dirname, f), 'utf8').matchAll(/'(roster-[a-z0-9-]+)'/g)].map((m) => m[1]!))
+    expect(codes).toEqual(expect.arrayContaining(['roster-slot-draft', 'roster-slot-empty', 'roster-slot-doubled', 'roster-slot-unknown', 'roster-lore-taken']))
+    for (const code of codes) expect((ko.rules as Record<string, unknown>)[code], code).toBeDefined()
   })
 })

@@ -272,6 +272,12 @@ function TimelineRow({ item, short }: { item: PlayerTimelineItem; short: (id: st
         {item.vetoed ? <Badge>{tp.vetoed}</Badge> : null}
       </div>
     )
+  } else if (item.kind === 'slot') {
+    body = (
+      <div className="what">
+        <span>{tp.slot(item.from, item.to, item.rotation)}</span>
+      </div>
+    )
   } else if (item.kind === 'award') {
     body = (
       <div className={`what${item.removed ? ' vetoed' : ''}`}>
@@ -364,9 +370,10 @@ function MoodChart({ v, short }: { v: PlayerStateView; short: (id: string) => st
     return i === -1 ? n - 1 : i
   }
   const marks = v.timeline
-    .filter((item) => item.kind !== 'mood' && item.kind !== 'wanting')
+    // A slot change that keeps his role (PG to SG) doesn't move his mood: it stays off the chart.
+    .filter((item) => item.kind !== 'mood' && item.kind !== 'wanting' && !(item.kind === 'slot' && item.rotation === null))
     .map((item) => {
-      const glyph = item.kind === 'said' ? '“' : item.kind === 'award' ? '★' : '⇄'
+      const glyph = item.kind === 'said' ? '“' : item.kind === 'award' ? '★' : item.kind === 'slot' ? '↕' : '⇄'
       const label =
         item.kind === 'said'
           ? [tm.channels[item.words.channel], item.words.quote, tm.actions[item.words.action]].filter(Boolean).join(' · ')
@@ -374,7 +381,9 @@ function MoodChart({ v, short }: { v: PlayerStateView; short: (id: string) => st
             ? `${tp.award(item.award, item.period, item.teamRank)}${item.removed ? ` (${tp.awardRemoved})` : ''}`
             : item.kind === 'trade' || item.kind === 'draft'
               ? `${(item.kind === 'trade' ? tp.trade : tp.draft)(short(item.from), short(item.to))}${item.vetoed ? ` (${tp.vetoed})` : ''}`
-              : ''
+              : item.kind === 'slot'
+                ? tp.slot(item.from, item.to, item.rotation)
+                : ''
       const vetoed = ((item.kind === 'trade' || item.kind === 'draft') && item.vetoed) || (item.kind === 'award' && item.removed)
       return { i: slot(item.at, item.kind === 'said'), glyph, label: `${when(item.at)} · ${label}`, kind: item.kind, vetoed }
     })

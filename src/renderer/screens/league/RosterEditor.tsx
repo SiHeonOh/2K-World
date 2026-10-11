@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import type { PlayerRow } from '@shared/league'
-import type { PlayerEdit, RosterSaveResult } from '@shared/roster'
+import { rosterProblems, type PlayerEdit, type RosterSaveResult } from '@shared/roster'
 import { parseHeightCm } from '@shared/height'
 import { folderKey, isFolderSafe } from '@shared/setup'
 import { call } from '../../api'
-import { Notice } from '../../components/ui'
+import { IssueList, Notice } from '../../components/ui'
 import { t } from '../../i18n'
 import { useLeague } from './LeagueLayout'
-import { RuleErrors } from './RuleErrors'
+import { RuleErrors, ruleText } from './RuleErrors'
 
 const tr = t.roster
 
-/** A player's facts as the inputs hold them (text), so half-typed values don't get lost. */
+/** A player's facts as the inputs hold them (text), so half-typed values don't get lost. Slot '' is none. */
 interface Row {
+  slot: string
   name: string
   height: string
   nicknames: string
@@ -22,6 +23,7 @@ interface Row {
 }
 
 const toRow = (p: PlayerRow): Row => ({
+  slot: p.slotId ?? '',
   name: p.name,
   height: p.height,
   nicknames: p.nicknames.join(', '),
@@ -70,7 +72,7 @@ const writeDrafts = (scope: string, drafts: Record<string, Changes>) => {
 /** The fields of `next` that differ from the league's row. */
 function changesOf(was: Row, next: Row): Changes | null {
   const c: Changes = {}
-  for (const k of ['name', 'height', 'nicknames', 'notes'] as const) if (next[k] !== was[k]) c[k] = next[k]
+  for (const k of ['slot', 'name', 'height', 'nicknames', 'notes'] as const) if (next[k] !== was[k]) c[k] = next[k]
   const ratings = Object.fromEntries(Object.entries(next.ratings).filter(([k, v]) => v !== (was.ratings[k] ?? '')))
   if (Object.keys(ratings).length > 0) c.ratings = ratings
   return Object.keys(c).length > 0 ? c : null
@@ -78,7 +80,7 @@ function changesOf(was: Row, next: Row): Changes | null {
 
 const NUMBER = /^-?\d+(\.\d+)?$/
 
-/** Roster facts for many players at once: names, heights, ratings, nicknames, notes. */
+/** Roster facts for many players at once: slots, names, heights, ratings, nicknames, notes. */
 export function RosterEditor() {
   const { league, reload, refreshing } = useLeague()
   const { config } = league
@@ -95,6 +97,16 @@ export function RosterEditor() {
   const grid = useRef<HTMLTableElement>(null)
 
   useEffect(() => setDrafts(readDrafts(scope)), [scope])
+  // Draft swaps go by slots, so the lineup can't change during the draft: a slot left unsaved from before it is dropped.
+  const slotsLocked = league.season.phase === 'draft'
+  useEffect(() => {
+    if (!slotsLocked || !Object.values(drafts).some((c) => c.slot !== undefined)) return
+    const all = Object.fromEntries(
+      Object.entries(drafts).flatMap(([id, { slot: _slot, ...rest }]) => (Object.keys(rest).length > 0 ? [[id, rest] as const] : [])),
+    )
+    setDrafts(all)
+    writeDrafts(scope, all)
+  }, [slotsLocked, drafts, scope])
 
   const grades = useMemo(() => config.ratings.gradeScale.map((g) => g.label), [config])
   const teamName = useMemo(() => new Map(league.teams.map((x) => [x.id, x.shortName])), [league])
@@ -150,14 +162,35 @@ export function RosterEditor() {
     return out
   }
 
+  // Each team whose lineup is being changed, checked as the server will: every slot held once, so a half-made swap shows at once.
+  const slotIssues = league.teams.flatMap((team) => {
+    const roster = league.players.filter((p) => p.teamId === team.id)
+    if (!roster.some((p) => drafts[p.id]?.slot !== undefined)) return []
+    return rosterProblems(
+      config.roster,
+      roster.map((p) => rowOf(p).slot || null),
+    ).flatMap((x) =>
+      x.kind === 'slot'
+        ? [{ teamId: team.id, text: ruleText(x.count === 0 ? 'roster-slot-empty' : 'roster-slot-doubled', { team: team.shortName, slot: x.slot, count: x.count }) }]
+        : [],
+    )
+  })
+  /** His team's lineup problems, for a slot cell he changed. */
+  const slotBad = (p: PlayerRow) =>
+    slotIssues
+      .filter((x) => x.teamId === p.teamId)
+      .map((x) => x.text)
+      .join('\n')
+
   const dirty = league.players.filter((p) => drafts[p.id])
-  const blocked = dirty.some((p) => Object.keys(problems(p, rowOf(p))).some((k) => k !== 'height'))
+  const blocked = slotIssues.length > 0 || dirty.some((p) => Object.keys(problems(p, rowOf(p))).some((k) => k !== 'height'))
 
   const editsOf = (): PlayerEdit[] =>
     dirty.map((p) => {
       const r = rowOf(p)
       const was = toRow(p)
       const e: PlayerEdit = { playerId: p.id }
+      if (r.slot !== was.slot && !slotsLocked) e.slotId = r.slot === '' ? null : r.slot
       if (r.name !== was.name) e.name = r.name.trim()
       if (r.height !== was.height) e.height = r.height
       if (r.nicknames !== was.nicknames) e.nicknames = splitNicknames(r.nicknames)
@@ -211,6 +244,7 @@ export function RosterEditor() {
           <div>
             <h1>{tr.title}</h1>
             <p className="help">{tr.intro}</p>
+            <p className="help">{slotsLocked ? tr.slotsLocked : tr.slotHelp}</p>
           </div>
           <div className="row">
             {dirty.length > 0 ? <span className="lore-status dirty">{tr.dirty(dirty.length)}</span> : <span className="lore-status">{tr.allSaved}</span>}
@@ -234,6 +268,11 @@ export function RosterEditor() {
           <input type="search" className="lore-search narrow" value={query} placeholder={tr.search} aria-label={tr.search} onChange={(e) => setQuery(e.target.value)} />
           {blocked ? <span className="roster-blocked">{tr.blocked}</span> : null}
         </div>
+        {slotIssues.length > 0 ? (
+          <div className="roster-slot-issues" role="status" aria-label={tr.slotIssues}>
+            <IssueList items={slotIssues.map((x) => ({ level: 'error' as const, text: x.text }))} />
+          </div>
+        ) : null}
         {error ? <RuleErrors error={error} /> : null}
         {result ? <SaveSummary result={result} slug={league.slug} /> : null}
       </div>
@@ -261,16 +300,46 @@ export function RosterEditor() {
               const r = rowOf(p)
               const was = toRow(p)
               const bad = problems(p, r)
+              // A slot he was moved to while his team's lineup doesn't fit yet.
+              if (r.slot !== was.slot && slotBad(p)) bad.slot = slotBad(p)
               const cls = (key: string, changed: boolean) => [changed ? 'changed' : '', bad[key] ? 'bad' : ''].filter(Boolean).join(' ')
-              // Fixed column numbers for moving up and down: name, height, each rating, nicknames.
+              // Fixed column numbers for moving up and down: name, height, each rating, nicknames, slot.
               const NAME = 0
               const HEIGHT = 1
               const NICK = 2 + config.ratings.columns.length
+              const SLOT = NICK + 1
               const expanded = open === p.id
               return [
                 <tr key={p.id} className={drafts[p.id] ? 'dirty' : ''}>
                   {school === '' ? <td className="muted">{teamName.get(p.teamId)}</td> : null}
-                  <td className="muted">{slotName.get(p.slotId ?? '') ?? '–'}</td>
+                  <td className={cls('slot', r.slot !== was.slot)} title={bad.slot}>
+                    <select
+                      className="compact slot"
+                      value={r.slot}
+                      aria-label={`${p.name} ${tr.slot}`}
+                      aria-invalid={bad.slot ? true : undefined}
+                      disabled={busy || slotsLocked}
+                      title={slotsLocked ? tr.slotsLocked : undefined}
+                      data-cell={`${ri}:${SLOT}`}
+                      onKeyDown={(e) => nav(e, ri, SLOT)}
+                      onChange={(e) => edit(p, (x) => ({ ...x, slot: e.target.value }))}
+                    >
+                      {/* No slot: only where the league allows it, or as the player has it now. */}
+                      {config.roster.slotMode === 'free' || r.slot === '' || was.slot === '' ? <option value="">–</option> : null}
+                      {config.roster.slots.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                      {[...new Set([was.slot, r.slot])]
+                        .filter((s) => s !== '' && !slotName.has(s))
+                        .map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                    </select>
+                  </td>
                   <td className={`sticky who ${cls('name', r.name !== was.name)}`} title={bad.name}>
                     <input
                       type="text"

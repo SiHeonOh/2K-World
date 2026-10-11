@@ -79,6 +79,12 @@ export interface EventPayloads {
   /** You edited a player's roster facts (fields: name, height, nicknames, notes, ratings.<column>). */
   player_edited: { playerId: string; teamId: string; fields: string[]; renamedFrom?: string }
   /**
+   * You changed players' slots on one team in 로스터 편집 (the lineup was changed in 2K first).
+   * `from`/`to` are slot ids. `rotation`: someone moved between a starter's slot and the bench,
+   * a role change the community hears about; the rest is bookkeeping.
+   */
+  slots_changed: { teamId: string; changes: { playerId: string; from: string | null; to: string | null }[]; rotation: boolean }
+  /**
    * A secret you approved as revealed (제안함): its text left 비밀 for 공개 (`to` public: it's
    * confirmed) or 소문 (only whispered about), or a secret relationship became known. Not a fact
    * change: the community reacts to it like news. It carries only what is now public, never the

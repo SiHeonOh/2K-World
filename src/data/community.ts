@@ -303,7 +303,10 @@ export function lastEventId(db: Db): number {
   return (db.prepare('SELECT COALESCE(MAX(id), 0) AS n FROM events').get() as { n: number }).n
 }
 
-/** Events fans would talk about; bookkeeping (settings, the 2K checklist, card allocation) doesn't make chatter stale. */
+/**
+ * Events fans would talk about; bookkeeping (settings, the 2K checklist, card allocation) doesn't make chatter stale.
+ * A slot change counts only when it moved someone between the starters and the bench (`rotation`).
+ */
 export const NEWS_EVENTS: readonly EventType[] = [
   'season_created',
   'season_started',
@@ -323,12 +326,17 @@ export const NEWS_EVENTS: readonly EventType[] = [
   'award_removed',
   'news_posted',
   'standings_moment',
+  'slots_changed',
 ]
 
 /** The newest event fans would talk about (0 when none). */
 export function lastNewsEventId(db: Db): number {
   const marks = NEWS_EVENTS.map(() => '?').join(',')
-  return (db.prepare(`SELECT COALESCE(MAX(id), 0) AS n FROM events WHERE type IN (${marks})`).get(...NEWS_EVENTS) as { n: number }).n
+  return (
+    db
+      .prepare(`SELECT COALESCE(MAX(id), 0) AS n FROM events WHERE type IN (${marks}) AND (type <> 'slots_changed' OR ${jsonField('payload', '$.rotation')} = 1)`)
+      .get(...NEWS_EVENTS) as { n: number }
+  ).n
 }
 
 /** Drops chatter written before the latest news, so fans never talk about a finished game as if it's coming. */

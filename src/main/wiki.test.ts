@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
 import { openDb, type Db } from '@data/db'
 import { listPlayers, listTeams, loadConfig, seedLeague } from '@data/league'
+import { updatePlayers } from '@data/roster'
 import { listGames, recordScore, startSeason } from '@data/season'
 import { pageByRef, pageByTitle, revisionBody, saveRevision, sectionsYouOwn } from '@data/wiki'
 import { syncSchoolCategories } from '@story/wiki'
@@ -71,6 +72,23 @@ describe('WikiService', () => {
     expect(playerPage.data.infobox?.rows[0]).toMatchObject({ label: '소속', value: team.shortName })
     expect(playerPage.data.record?.rows[0]?.cells.slice(2, 4)).toEqual(['1', '33.0'])
     expect(playerPage.data.history.map((h) => h.text)).toEqual([expect.stringContaining('33점')])
+  })
+
+  it('a lineup change shows live in the infobox; going to the bench goes in his history, PG to SG doesn’t', () => {
+    wiki.ensure(db, dir, true)
+    // p5 is the first school's C, p6 its bench; p1 its PG (같은이름), p2 its SG.
+    const titleOf = (id: string) => (db.prepare("SELECT title FROM wiki_pages WHERE kind = 'player' AND ref_id = ?").get(id) as { title: string }).title
+    updatePlayers(db, [
+      { playerId: 'p5', slotId: 'bench' },
+      { playerId: 'p6', slotId: 'c' },
+      { playerId: 'p1', slotId: 'sg' },
+      { playerId: 'p2', slotId: 'pg' },
+    ])
+    const benched = wiki.page(db, dir, titleOf('p5'))
+    expect(benched.data.infobox?.rows.find((r) => r.label === '포지션')?.value).toBe('Bench')
+    expect(benched.data.history.map((h) => h.text)).toEqual(['벤치로 이동 (C → Bench)'])
+    expect(wiki.page(db, dir, titleOf('p6')).data.history.map((h) => h.text)).toEqual(['주전 발탁 (Bench → C)'])
+    expect(wiki.page(db, dir, titleOf('p2')).data.history).toEqual([])
   })
 
   it('saves your edits as revisions, refuses a stale edit, and finds pages', () => {
