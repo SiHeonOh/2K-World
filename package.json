@@ -1,0 +1,42 @@
+{
+  "name": "2k-world",
+  "productName": "2K World",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A desktop companion for NBA 2K leagues: league office, wiki and community, in Korean.",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "node e2e/season.mjs && node e2e/gameday.mjs && node e2e/community.mjs && node e2e/wiki.mjs && node e2e/lore.mjs && node e2e/suggestions.mjs && node e2e/gm.mjs && node e2e/schedule.mjs && node e2e/played.mjs",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/shortcut.ps1"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "pretendard": "1.3.9",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-router": "7.18.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.4.5",
+    "electron-vite": "5.0.0",
+    "playwright-core": "1.63.0",
+    "typescript": "6.0.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.11"
+  }
+}

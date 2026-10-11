@@ -1,0 +1,31 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@core/*": ["./src/core/*"],
+      "@data/*": ["./src/data/*"],
+      "@ingest/*": ["./src/ingest/*"],
+      "@main/*": ["./src/main/*"],
+      "@ai/*": ["./src/ai/*"],
+      "@lore/*": ["./src/lore/*"],
+      "@story/*": ["./src/story/*"],
+      "@sim/*": ["./src/sim/*"]
+    }
+  },
+  "include": [
+    "src/shared/**/*",
+    "src/core/**/*",
+    "src/data/**/*",
+    "src/ingest/**/*",
+    "src/main/**/*",
+    "src/ai/**/*",
+    "src/lore/**/*",
+    "src/story/**/*",
+    "src/sim/**/*",
+    "scripts/**/*",
+    "electron.vite.config.ts",
+    "vitest.config.ts"
+  ]
+}

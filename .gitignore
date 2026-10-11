@@ -1,0 +1,20 @@
+# Private: your league data (rosters, lore, screenshots, saves). Never pushed.
+league-data/
+
+# Private: the planning doc contains your league's players and rules.
+PLAN.md
+
+# Private: development docs, kept on this PC only.
+ARCHITECTURE.md
+README.md
+
+# Dependencies and build output (for later)
+node_modules/
+dist/
+out/
+*.log
+Thumbs.db
+.DS_Store
+
+# Claude Code files (settings, agent worktrees)
+.claude/

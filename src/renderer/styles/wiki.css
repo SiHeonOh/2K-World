@@ -1,0 +1,567 @@
+/* ── Wiki (a Namuwiki-like layout in our own colours) ─────────────────── */
+
+.wk {
+  --wk-main: #0f8f86;
+  --wk-main-dark: #0b6f68;
+  --wk-line: #ccd2d8;
+  --wk-link: #0275d8;
+  --wk-missing: #d32f2f;
+  gap: 0;
+}
+.wk-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--wk-main);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.wk-brand {
+  background: none;
+  border: 0;
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  font-size: 17px;
+  cursor: pointer;
+}
+.wk-nav {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+.wk-nav button {
+  background: transparent;
+  border: 0;
+  color: #e3fbf8;
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.wk-nav button:hover {
+  background: var(--wk-main-dark);
+}
+.wk-search {
+  display: flex;
+  gap: 0;
+}
+.wk-search input {
+  font: inherit;
+  border: 0;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  padding: 6px 10px;
+  width: 260px;
+}
+.wk-search button {
+  font: inherit;
+  border: 0;
+  background: var(--wk-main-dark);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  cursor: pointer;
+}
+.wk-page {
+  background: var(--surface);
+  border: 1px solid var(--wk-line);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 20px 26px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wk-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  border-bottom: 1px solid var(--wk-line);
+  padding-bottom: 10px;
+}
+.wk-head h1 {
+  font-size: 28px;
+  margin: 0;
+  word-break: keep-all;
+}
+.wk-tools {
+  display: flex;
+  border: 1px solid var(--wk-line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex: none;
+}
+.wk-tools button {
+  background: var(--surface);
+  border: 0;
+  border-left: 1px solid var(--wk-line);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.wk-tools button:first-child {
+  border-left: 0;
+}
+.wk-tools button:hover,
+.wk-tools button.on {
+  background: var(--surface-2);
+}
+.wk-cats {
+  border: 1px solid var(--wk-line);
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.wk-updated {
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: right;
+}
+.wk-oldrev,
+.wk-missing {
+  background: var(--warn-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14px;
+}
+/* Numbers an AI editor wrote that its facts didn't hold: a small notice on the page, a badge in the history. */
+.wk-flagged-note {
+  border-left: 3px dotted var(--warn);
+  color: var(--warn);
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.wk-flagged {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.wk-linkbtn {
+  background: none;
+  border: 0;
+  color: var(--wk-link);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.wk-content::after {
+  content: '';
+  display: block;
+  clear: both;
+}
+.wk-infobox {
+  float: right;
+  width: 300px;
+  margin: 0 0 14px 20px;
+  border-collapse: collapse;
+  border: 1px solid var(--wk-line);
+  font-size: 13px;
+}
+.wk-infobox thead th {
+  padding: 10px;
+  text-align: center;
+}
+.wk-infobox-title {
+  font-size: 17px;
+  font-weight: 800;
+}
+.wk-infobox-sub {
+  font-size: 12px;
+  opacity: 0.85;
+}
+.wk-infobox tbody th {
+  width: 90px;
+  text-align: center;
+  padding: 6px;
+  border-top: 1px solid var(--wk-line);
+  font-weight: 600;
+}
+.wk-infobox tbody td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--wk-line);
+}
+.wk-body {
+  line-height: 1.75;
+  font-size: 15px;
+}
+.wk-body p {
+  margin: 6px 0;
+}
+.wk-link {
+  color: var(--wk-link);
+  text-decoration: none;
+}
+.wk-link:hover {
+  text-decoration: underline;
+}
+.wk-link.missing {
+  color: var(--wk-missing);
+}
+.wk-h {
+  border-bottom: 1px solid var(--wk-line);
+  padding-bottom: 4px;
+  margin: 22px 0 8px;
+  cursor: pointer;
+}
+.wk-h.l2 {
+  font-size: 22px;
+}
+.wk-h.l3 {
+  font-size: 18px;
+}
+.wk-h.l4,
+.wk-h.l5,
+.wk-h.l6 {
+  font-size: 16px;
+}
+.wk-h.folded {
+  color: var(--text-3);
+}
+.wk-num {
+  color: var(--wk-main);
+  text-decoration: none;
+}
+.wk-toc {
+  display: inline-block;
+  border: 1px solid var(--wk-line);
+  padding: 10px 18px 10px 14px;
+  margin: 6px 0 10px;
+  font-size: 14px;
+}
+.wk-toc-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.wk-toc-item a {
+  color: var(--wk-link);
+  text-decoration: none;
+}
+.wk-fn {
+  font-size: 11px;
+}
+.wk-fn a {
+  color: var(--wk-link);
+  text-decoration: none;
+}
+.wk-footnotes {
+  border-top: 1px solid var(--wk-line);
+  margin-top: 24px;
+  padding-top: 8px;
+  font-size: 13px;
+  list-style: none;
+  padding-left: 0;
+}
+.wk-footnotes a {
+  color: var(--wk-link);
+  text-decoration: none;
+}
+.wk-table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 14px;
+}
+.wk-table th,
+.wk-table td {
+  border: 1px solid var(--wk-line);
+  padding: 5px 10px;
+}
+.wk-table th {
+  background: var(--surface-2);
+}
+.wk-body blockquote {
+  border-left: 4px solid var(--wk-main);
+  background: var(--surface-2);
+  margin: 8px 0;
+  padding: 6px 12px;
+}
+.wk-fold {
+  border: 1px solid var(--wk-line);
+  padding: 4px 10px;
+  margin: 8px 0;
+}
+.wk-fold summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.wk-history {
+  padding-left: 18px;
+}
+.wk-season {
+  color: var(--wk-main);
+  font-weight: 600;
+  margin-right: 4px;
+}
+.wk-empty {
+  color: var(--text-3);
+  font-size: 14px;
+}
+.wk-editor {
+  width: 100%;
+  min-height: 480px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+  border: 1px solid var(--wk-line);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  resize: vertical;
+}
+.wk-syntax {
+  font-size: 12px;
+  margin: 0;
+}
+.wk-save {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.wk-save input {
+  flex: 1;
+  font: inherit;
+  border: 1px solid var(--wk-line);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.wk-revs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.wk-revs th,
+.wk-revs td {
+  border-bottom: 1px solid var(--wk-line);
+  padding: 6px 8px;
+  text-align: left;
+}
+.wk-who.system {
+  color: var(--text-3);
+}
+.wk-who.user {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.wk-plus {
+  color: var(--ok);
+}
+.wk-minus {
+  color: var(--err);
+}
+.wk-list,
+.wk-results {
+  padding-left: 18px;
+}
+.wk-results li {
+  margin-bottom: 8px;
+}
+.wk-kind {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.wk-snippet {
+  font-size: 13px;
+  color: var(--text-2);
+}
+@media (max-width: 1300px) {
+  .wk-infobox {
+    width: 250px;
+  }
+  .wk-search input {
+    width: 180px;
+  }
+}
+
+/* 비교 (diffs) and the history's picks */
+.wk-pick {
+  white-space: nowrap;
+  width: 1%;
+}
+.wk-acts {
+  white-space: nowrap;
+}
+.wk-acts .wk-linkbtn + .wk-linkbtn {
+  margin-left: 10px;
+}
+.wk-diff-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.wk-diff-nav {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.wk-diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  border: 1px solid var(--wk-line);
+}
+.wk-diff td {
+  padding: 1px 6px;
+  vertical-align: top;
+}
+.wk-diff .no {
+  width: 1%;
+  color: var(--text-3);
+  text-align: right;
+  user-select: none;
+  border-right: 1px solid var(--wk-line);
+}
+.wk-diff .sign {
+  width: 1%;
+  user-select: none;
+}
+.wk-diff .txt {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wk-diff tr.add {
+  background: var(--ok-soft);
+}
+.wk-diff tr.del {
+  background: var(--err-soft);
+}
+.wk-diff tr.add mark {
+  background: #b7ebc2;
+  color: inherit;
+}
+.wk-diff tr.del mark {
+  background: #ffc9c9;
+  color: inherit;
+  text-decoration: line-through;
+}
+.wk-diff tr.skip td {
+  background: var(--surface-2);
+  color: var(--text-3);
+  text-align: center;
+  font-family: inherit;
+}
+
+/* 토론 (talk threads) and disputes */
+.wk-tools button.wk-talk-on {
+  color: var(--wk-main-dark);
+  font-weight: 600;
+}
+.wk-dispute {
+  background: var(--err-soft);
+  border-left: 4px solid var(--err);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.wk-threads {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.wk-threads li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--wk-line);
+}
+.wk-thread-meta {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.wk-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.wk-badge.war,
+.wk-badge.pushback {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.wk-badge.open {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.wk-newthread,
+.wk-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--wk-line);
+  padding-top: 12px;
+}
+.wk-newthread h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.wk-newthread input,
+.wk-newthread textarea,
+.wk-reply textarea,
+.wk-reply input {
+  font: inherit;
+  border: 1px solid var(--wk-line);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.wk-newthread textarea,
+.wk-reply textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.wk-reply-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.wk-grow {
+  flex: 1;
+}
+.wk-talk {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wk-res {
+  border: 1px solid var(--wk-line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.wk-res-head {
+  display: flex;
+  justify-content: space-between;
+  background: var(--surface-2);
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.wk-res.op .wk-res-head {
+  background: #d8f0ee;
+}
+.wk-res.user .wk-res-head {
+  background: var(--accent-soft);
+}
+.wk-res-body {
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+.wk-res-status {
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 0 10px;
+}
+.wk-replying {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 0;
+}

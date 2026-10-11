@@ -1,0 +1,169 @@
+/* ── 제안함 (lore suggestion inbox) ─────────────────────────────────── */
+
+.suggest {
+  gap: 16px;
+}
+.suggest-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.suggest-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+.suggest-group-head h3 {
+  font-size: 14px;
+  color: var(--text-2);
+}
+.suggest-card {
+  gap: 10px;
+  padding: 14px 18px;
+}
+.suggest-card.editing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.suggest-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.suggest-name {
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+}
+.suggest-name:hover {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+.suggest-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.suggest-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+}
+.suggest-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.suggest-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.suggest-traits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 2px 18px;
+}
+.suggest-card.editing .suggest-traits {
+  grid-template-columns: minmax(0, 1fr);
+}
+.suggest-card.editing .suggest-row {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+.suggest-changed {
+  color: var(--accent-text);
+}
+.suggest-prose {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.suggest-prose-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.suggest-new-text {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  white-space: pre-wrap;
+}
+/* The 비밀 text a reveal card would take out of the secret section. */
+.suggest-secret-text {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  white-space: pre-wrap;
+}
+.suggest-current-text {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+.suggest-rels {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.suggest-rel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.suggest-actions .spacer {
+  flex: 1;
+}
+.suggest-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.suggest-history > button {
+  align-self: flex-start;
+}
+.suggest-history-table td {
+  vertical-align: top;
+}
+
+/* The lore editor's AI draft bar */
+.lore-editor-tools {
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.lore-create .lore-ai {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.lore-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lore-ai-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 720px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}

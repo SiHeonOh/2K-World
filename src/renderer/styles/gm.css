@@ -1,0 +1,148 @@
+/* ── 단장실 (the AI GMs) ────────────────────────────────────────────── */
+
+.warroom {
+  gap: 16px;
+}
+.gm-status .card-head {
+  align-items: flex-start;
+}
+.gm-window {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gm-window-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+.gm-window-head h3 {
+  font-size: 14px;
+  color: var(--text-2);
+}
+.gm-talk {
+  gap: 10px;
+  padding: 14px 18px;
+}
+.gm-talk.accepted {
+  border-left: 3px solid var(--ok);
+}
+.gm-talk.agreed {
+  border-left: 3px solid var(--info);
+}
+.gm-talk.failed,
+.gm-talk.rejected,
+.gm-talk.declined {
+  border-left: 3px solid var(--border-strong);
+}
+.gm-talk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.gm-deal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+.gm-deal-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.gm-deal-arrow {
+  color: var(--text-3);
+  font-size: 16px;
+}
+.gm-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gm-step {
+  max-width: 78%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.gm-step.left {
+  align-self: flex-start;
+  border-top-left-radius: 2px;
+}
+.gm-step.right {
+  align-self: flex-end;
+  border-top-right-radius: 2px;
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+.gm-step-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.gm-message {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.gm-note {
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.gm-report {
+  margin: 0;
+  font-size: 12px;
+}
+.gm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.gm-card {
+  gap: 8px;
+  padding: 14px 16px;
+}
+.gm-card.inactive {
+  opacity: 0.6;
+}
+.gm-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12.5px;
+}
+.gm-trust .up {
+  color: var(--ok);
+}
+.gm-trust .down {
+  color: var(--err);
+}
+.gm-draft-note {
+  gap: 6px;
+  padding: 12px 16px;
+}
+.gm-draft-note.swap {
+  border-left: 3px solid var(--accent);
+}
+.gm-draft-note.protect {
+  border-left: 3px solid var(--info);
+}

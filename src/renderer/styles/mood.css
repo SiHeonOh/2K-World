@@ -1,0 +1,367 @@
+/* ── Locker room (player moods) ───────────────────────────────────────── */
+
+.mood,
+.pstate {
+  --band-happy: #2b8a3e;
+  --band-content: #5c940d;
+  --band-neutral: #868e96;
+  --band-unhappy: #e8590c;
+  --band-boiling: #c92a2a;
+}
+.mood-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1.2fr) 72px minmax(80px, 1fr) minmax(120px, 1.6fr) minmax(130px, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.mood-row:last-of-type {
+  border-bottom: 0;
+}
+.mood-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mood-default {
+  color: var(--text-3);
+  margin-left: 2px;
+}
+.mood-band {
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 10px;
+  padding: 2px 6px;
+  color: #fff;
+}
+.mood-band.band-happy {
+  background: var(--band-happy);
+}
+.mood-band.band-content {
+  background: var(--band-content);
+}
+.mood-band.band-neutral {
+  background: var(--band-neutral);
+}
+.mood-band.band-unhappy {
+  background: var(--band-unhappy);
+}
+.mood-band.band-boiling {
+  background: var(--band-boiling);
+}
+.mood-bar {
+  position: relative;
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+.mood-bar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--border-strong);
+}
+.mood-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 4px;
+  background: var(--band-neutral);
+}
+.band-happy .mood-fill,
+.band-content .mood-fill {
+  background: var(--band-happy);
+}
+.band-unhappy .mood-fill,
+.band-boiling .mood-fill {
+  background: var(--band-boiling);
+}
+.mood-reasons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mood-reasons .neg {
+  color: var(--err);
+}
+.mood-reasons .pos {
+  color: var(--ok);
+}
+.mood-share {
+  font-size: 12px;
+  text-align: right;
+}
+.mood-clashes {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.pregame .mood-row {
+  grid-template-columns: minmax(90px, 1fr) 64px minmax(110px, 1.4fr);
+}
+.pregame .mood-bar,
+.pregame .mood-share {
+  display: none;
+}
+
+.mood-lore {
+  color: inherit;
+  text-decoration: none;
+}
+.mood-lore:hover b {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.mood-said {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 2px 0 4px 2px;
+  font-size: 12.5px;
+}
+.mood-said q {
+  color: var(--text);
+}
+.mood-action {
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.mood-action.public_request,
+.mood-action.private_request,
+.mood-action.public_complaint {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.mood-action.praise_teammate {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.mood-said-note {
+  color: var(--text-3);
+}
+
+.roster-player {
+  color: inherit;
+  text-decoration: none;
+}
+.roster-player:hover b {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ── 선수 상태 (one player over a season) ─────────────────────────────── */
+
+.pstate-head .mood-band {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.pstate-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .pstate-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.pstate-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.pstate-chart .zone-label {
+  font-size: 10px;
+  fill: var(--text-3);
+}
+.pstate-chart .axis {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.pstate-chart .line {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 2;
+}
+.pstate-chart .marker {
+  font-size: 12px;
+  fill: var(--text-2);
+  cursor: default;
+}
+.pstate-chart .marker.award {
+  fill: #e67700;
+}
+.pstate-chart .marker.vetoed {
+  fill: var(--text-3);
+  text-decoration: line-through;
+}
+.pstate-parts {
+  display: grid;
+  grid-template-columns: 84px 1fr 40px;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.pstate-parts .num {
+  text-align: right;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.pstate-bar {
+  position: relative;
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+.pstate-bar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--border-strong);
+}
+.pstate-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 4px;
+}
+.pstate-bar i.pos {
+  background: var(--band-happy);
+}
+.pstate-bar i.neg {
+  background: var(--band-boiling);
+}
+.pstate-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12.5px;
+}
+.pstate-traits .dots {
+  letter-spacing: 1px;
+  color: var(--accent-text);
+}
+.pstate-rels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+.pstate-rels li {
+  padding: 3px 0;
+}
+.pstate-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pstate-timeline li {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.pstate-timeline li:last-child {
+  border-bottom: 0;
+}
+.pstate-timeline .when {
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pstate-timeline .what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.pstate-timeline .what.vetoed > span:first-child {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.pstate .small {
+  font-size: 12px;
+}
+
+.mood-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.mood-tag.franchise {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.mood-tag.wants-out {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.pstate-chart .feeling-line {
+  fill: none;
+  stroke-width: 2;
+}
+.pstate-chart .feeling-line.trust {
+  stroke: #1c7ed6;
+  stroke-dasharray: 5 3;
+}
+.pstate-chart .feeling-line.attachment {
+  stroke: var(--band-happy);
+  stroke-dasharray: 2 3;
+}
+.pstate-chart .feeling-line.wanting {
+  stroke: var(--band-boiling);
+}
+.pstate-feeling {
+  margin-bottom: 12px;
+}
+.pstate-feeling:last-child {
+  margin-bottom: 0;
+}
+.pstate-feeling-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.pstate-feeling-head .num,
+.pstate .num {
+  font-variant-numeric: tabular-nums;
+}
+.pstate-bar.plain::after {
+  display: none;
+}
+.pstate-feeling-why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.pstate .neg-text {
+  color: var(--err);
+}
