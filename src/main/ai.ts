@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ClaudeCliAdapter, ReplayAdapter, type AiAdapter, type JobResult } from '@ai/adapter'
 import { billsPerUse, checkClaude, findClaude, usesSubscription } from '@ai/checks'
-import { JobQueue, RetryRefused, type JobKind, type JobRow } from '@ai/queue'
+import { CancelRefused, JobQueue, RetryRefused, type JobKind, type JobRow } from '@ai/queue'
 import { AI_JOB_OF_KIND, type AiStatus, type ClaudeStatus } from '@shared/ai'
 import { aiFor } from '@shared/config/schema'
 import { slugKey } from '@shared/league'
@@ -20,8 +20,23 @@ export const FAKE_READ_FILE = FAKE_OUTPUT_FILE
 /** A demo answer for a job kind, or null when the kind has none. */
 export type DemoWriter = (kind: string, input: unknown) => unknown
 
+/**
+ * TWOK_FAKE_HOLD (demo mode, for tests): job kinds, comma-separated, whose
+ * runs never answer until they're ended, so jobs can be seen running and
+ * waiting behind them, and cancelled. Read at each run.
+ */
+const held = (kind: string | undefined) => kind !== undefined && (process.env.TWOK_FAKE_HOLD ?? '').split(',').includes(kind)
+
 function fakeAdapter(demos: DemoWriter[]): AiAdapter {
-  return new ReplayAdapter((req): JobResult => {
+  return new ReplayAdapter((req): JobResult | Promise<JobResult> => {
+    if (held(req.kind)) {
+      // Ended as a real run is: the queue stopping or 취소.
+      return new Promise((resolve) => {
+        const end = () => resolve({ ok: false, error: 'failed', message: 'aborted' })
+        if (req.signal?.aborted) end()
+        else req.signal?.addEventListener('abort', end, { once: true })
+      })
+    }
     const file = join(req.workdir, FAKE_OUTPUT_FILE)
     if (existsSync(file)) return { ok: true, data: JSON.parse(readFileSync(file, 'utf8')) as unknown, costUsd: 0, durationMs: 1, raw: '' }
     for (const demo of demos) {
@@ -214,6 +229,25 @@ export class AiService {
       if (e instanceof RetryRefused) refuse(e.code)
       throw e
     }
+  }
+
+  /**
+   * 취소 for a job in a league's queue: a waiting one never runs, a running
+   * one's Claude Code run is ended and its answer dropped (JobQueue.cancel).
+   * Every kind can go: what waits on a job carries on as after a failure.
+   */
+  cancel(slug: string, db: Db, leagueFolder: string, jobId: number): void {
+    try {
+      this.queueFor(slug, db, leagueFolder).cancel(jobId)
+    } catch (e) {
+      if (e instanceof CancelRefused) refuse(e.code)
+      throw e
+    }
+  }
+
+  /** Cancels every waiting job of one kind (the one running finishes); returns how many (제안함's 대기 중인 초안 취소). */
+  cancelWaiting(slug: string, db: Db, leagueFolder: string, kind: string): { cancelled: number } {
+    return { cancelled: this.queueFor(slug, db, leagueFolder).cancelWaiting(kind) }
   }
 
   /**

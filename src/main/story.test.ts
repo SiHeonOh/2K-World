@@ -175,6 +175,25 @@ describe('StoryService (demo writer)', () => {
     expect(second.waiting).toBe(waiting - second.revealed)
   })
 
+  it('refills chatter again on the next refresh once you cancel the batch being written', async () => {
+    story.afterChange('test', db, dir)
+    expect(story.refresh('test', db, dir, () => 0.5).refilling).toBe(true)
+    const batches = () => jobs().filter((j) => j.kind === 'chatter_batch')
+    // One batch at a time: while it's on its way, a refresh adds none.
+    expect(story.refresh('test', db, dir, () => 0.5).refilling).toBe(true)
+    expect(batches()).toHaveLength(1)
+    const batch = (db.prepare("SELECT id FROM jobs WHERE kind = 'chatter_batch'").get() as { id: number }).id
+    ai.cancel('test', db, dir, batch)
+    expect(story.status('test', db).writing).toBe(0)
+    // Its answer is dropped: nothing reaches the buffer.
+    await drain()
+    expect(bufferSize(db)).toBe(0)
+    expect(story.refresh('test', db, dir, () => 0.5)).toMatchObject({ refilling: true, budgetSpent: false })
+    expect(batches().map((j) => j.status)).toEqual(['cancelled', 'running'])
+    await drain()
+    expect(bufferSize(db)).toBeGreaterThan(4)
+  })
+
   it('answers your posts and comments, and turns news into an event thread', async () => {
     story.afterChange('test', db, dir)
     const ace = sampleSetup().players.find((p) => p.teamId === listTeams(db)[0]!.id)!.name

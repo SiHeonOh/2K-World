@@ -53,6 +53,7 @@ import type { LoreService } from './lore'
 
 const jobsWaiting = (db: Db, kind: string) =>
   (db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind = ? AND status IN ('queued', 'running')").get(kind) as { n: number }).n
+const jobsQueued = (db: Db, kind: string) => (db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind = ? AND status = 'queued'").get(kind) as { n: number }).n
 
 /**
  * What an approved reveal tells the community: who, where it went, and the
@@ -92,6 +93,7 @@ export class SuggestionService {
     return {
       pending: pendingCount(db),
       drafting: jobsWaiting(db, LORE_DRAFT),
+      draftsQueued: jobsQueued(db, LORE_DRAFT),
       sweeping: jobsWaiting(db, LORE_SUGGEST) + jobsWaiting(db, LORE_REVEAL),
       aiReady: this.ai.fake || this.ai.ready(),
     }

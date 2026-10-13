@@ -94,6 +94,10 @@ export const suggestText = {
   statuses: { approved: '승인', rejected: '거절', expired: '만료', pending: '대기' } as Record<string, string>,
   autoTag: '자동',
   drafting: (n: number) => `AI 초안 ${n}건 작성 중…`,
+  cancelDrafts: '대기 중인 초안 취소',
+  confirmCancelDrafts: (waiting: number, running: number) =>
+    `아직 시작하지 않은 AI 초안 ${waiting}건을 취소할까요?${running ? ` 지금 쓰고 있는 ${running}건은 끝까지 써요.` : ''} 취소한 초안은 나중에 로어 화면에서 다시 받을 수 있어요.`,
+  draftsCancelled: (n: number) => (n ? `대기 중이던 AI 초안 ${n}건을 취소했어요.` : '취소할 초안이 없었어요. 그사이 시작했거나 끝났어요.'),
   sweeping: '이번 라운드 제안을 고르는 중…',
   aiOff: 'Claude Code를 쓸 수 없어서 새 제안이 만들어지지 않아요. 앱 설정에서 확인하세요.',
 

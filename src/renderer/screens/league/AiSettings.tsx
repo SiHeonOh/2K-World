@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RecentJob } from '@shared/ai'
+import { IN_QUEUE_SHOWN, type RecentJob } from '@shared/ai'
 import type { PushTopic } from '@shared/api'
 import { AI_JOBS, type AiConfig, type AiJob, type EffortSetting, type ModelName } from '@shared/config/schema'
 import type { LeagueSnapshot } from '@shared/league'
@@ -167,8 +167,12 @@ function AiModels() {
   )
 }
 
-/** Any job finishing, done or failed, adds a row; the queue pausing (a job waiting to try again) too. */
-const JOBS_TOPIC: PushTopic[] = ['jobs']
+/**
+ * Any job finishing, done or failed, adds a row; the queue pausing (a job waiting to try again) too.
+ * A job queued, started, put back or cancelled changes 대기 중.
+ */
+const JOBS_TOPIC: PushTopic[] = ['jobs', 'waiting']
+const IN_QUEUE = new Set<RecentJob['status']>(['running', 'queued', 'waiting'])
 
 const effortLabel = (effort: string) => (Object.hasOwn(ta.efforts, effort) ? ta.efforts[effort as EffortSetting] : effort)
 
@@ -269,10 +273,150 @@ function RetryButton({ slug, job, onRetried }: { slug: string; job: RecentJob; o
   )
 }
 
-/** The latest finished jobs (and any waiting to try again): what each asked for, which model answered, and what it used. */
+const jobName = (j: RecentJob) => (j.job ? ta.jobs[j.job].name : j.kind)
+
+/** 취소 for one job in the queue; a running one asks first (its run is ended and what it wrote dropped). */
+function CancelButton({ slug, job, onCancelled }: { slug: string; job: RecentJob; onCancelled: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const cancel = async () => {
+    if (job.status === 'running' && !window.confirm(tr.confirmCancelRunning(jobName(job)))) return
+    setBusy(true)
+    setError(null)
+    try {
+      await call('ai.cancelJob', slug, job.id)
+      onCancelled()
+    } catch (e) {
+      setError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <button className="btn small ghost" title={tr.cancelHelp} disabled={busy} onClick={() => void cancel()}>
+        {busy ? tr.cancelling : tr.cancel}
+      </button>
+      {error ? <RuleErrors error={error} /> : null}
+    </>
+  )
+}
+
+/**
+ * 대기 중: the jobs still in the queue, the running one first, then the rest
+ * in the order they'd run, each with 취소. A kind with several waiting gets
+ * 모두 취소 (the running one finishes); `onNotice` says how many went, above
+ * the list (which may be gone by then).
+ */
+function InQueue({
+  slug,
+  jobs,
+  shown,
+  onChange,
+  onNotice,
+}: {
+  slug: string
+  jobs: RecentJob[]
+  shown: ReadonlySet<number>
+  onChange: () => void
+  onNotice: (text: string | null) => void
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const running = jobs.some((j) => j.status === 'running')
+  // A running job's time keeps counting.
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [running])
+  const kinds = new Map<string, RecentJob[]>()
+  for (const j of jobs) if (j.status !== 'running') kinds.set(j.kind, [...(kinds.get(j.kind) ?? []), j])
+  const cancelAll = async (kind: string, first: RecentJob, n: number) => {
+    if (!window.confirm(tr.confirmCancelAll(jobName(first), n))) return
+    setBusy(true)
+    onNotice(null)
+    setError(null)
+    try {
+      onNotice(tr.cancelledAll((await call('ai.cancelWaiting', slug, kind)).cancelled))
+      onChange()
+    } catch (e) {
+      setError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <h3>{tr.inQueue(jobs.length)}</h3>
+      {[...kinds].some(([, list]) => list.length > 1) ? (
+        <div className="row">
+          {[...kinds]
+            .filter(([, list]) => list.length > 1)
+            .map(([kind, list]) => (
+              <button key={kind} className="btn small ghost" disabled={busy} onClick={() => void cancelAll(kind, list[0]!, list.length)}>
+                {tr.cancelAll(jobName(list[0]!), list.length)}
+              </button>
+            ))}
+        </div>
+      ) : null}
+      {error ? <RuleErrors error={error} /> : null}
+      <div className="table-wrap">
+        <table className="data compact ai-in-queue">
+          <thead>
+            <tr>
+              <th>{tr.job}</th>
+              <th>{tr.queuedAt}</th>
+              <th>{tr.status}</th>
+              <th>{ta.model}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((j) => (
+              <tr key={j.id} id={`ai-job-${j.id}`}>
+                <td>{jobName(j)}</td>
+                <td>{formatDate(j.queuedAt, true)}</td>
+                <td>
+                  {j.status === 'running' ? (
+                    <Badge tone="info">{j.startedAt ? tr.runningFor(took(Math.max(0, now - Date.parse(j.startedAt)))) : tr.running}</Badge>
+                  ) : j.status === 'waiting' ? (
+                    <Badge tone="warn">{j.errorKind ? `${tr.waiting} · ${tr.errors[j.errorKind]}` : tr.waiting}</Badge>
+                  ) : (
+                    <Badge>{tr.queued}</Badge>
+                  )}
+                  {j.numberRetry ? <Redo label={tr.redo} help={tr.redoHelp} to={j.retryOf} shown={shown} jump={tr.toFirst} /> : null}
+                  {j.status === 'waiting' ? (
+                    <div className="ai-job-actions">
+                      <JobDetails slug={slug} job={j} />
+                    </div>
+                  ) : null}
+                </td>
+                <td>{j.askedModel ? `${j.askedModel}${j.askedEffort ? ` · ${effortLabel(j.askedEffort)}` : ''}` : <span className="muted">—</span>}</td>
+                <td>
+                  <CancelButton slug={slug} job={j} onCancelled={onChange} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {jobs.length >= IN_QUEUE_SHOWN ? <p className="muted small">{tr.moreInQueue(IN_QUEUE_SHOWN)}</p> : null}
+    </>
+  )
+}
+
+/** The jobs still in the queue (대기 중), then the latest finished ones: what each asked for, which model answered, and what it used. */
 function RecentJobs({ slug }: { slug: string }) {
   const jobs = useLoad(() => call('ai.recentJobs', slug), [slug], { keepPrevious: true })
   usePush(slug, JOBS_TOPIC, jobs.reload)
+  const [notice, setNotice] = useState<string | null>(null)
+  const all = jobs.state === 'ready' ? jobs.value : []
+  const inQueue = all.filter((j) => IN_QUEUE.has(j.status))
+  const finished = all.filter((j) => !IN_QUEUE.has(j.status))
+  // Jumps between a number-check redo and the job it redoes work across both tables.
+  const shown = new Set(all.map((x) => x.id))
   return (
     <div className="card ai-recent">
       <div className="card-head">
@@ -282,65 +426,68 @@ function RecentJobs({ slug }: { slug: string }) {
         </button>
       </div>
       <p className="help">{tr.help}</p>
+      {notice ? <Notice tone="ok">{notice}</Notice> : null}
       {jobs.state === 'loading' ? (
         <Loading />
       ) : jobs.state === 'error' ? (
         <ErrorBox error={jobs.error} onRetry={jobs.reload} />
-      ) : jobs.value.length === 0 ? (
-        <p className="muted">{tr.empty}</p>
       ) : (
-        <div className="table-wrap">
-          <table className="data compact">
-            <thead>
-              <tr>
-                <th>{tr.job}</th>
-                <th>{tr.when}</th>
-                <th>{tr.status}</th>
-                <th>{tr.model}</th>
-                <th className="num">{tr.tokens}</th>
-                <th className="num">{tr.cost}</th>
-                <th className="num">{tr.took}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.value.map((j, _, all) => (
-                <tr key={j.id} id={`ai-job-${j.id}`}>
-                  <td>{j.job ? ta.jobs[j.job].name : j.kind}</td>
-                  <td>{formatDate(j.finishedAt, true)}</td>
-                  <td>
-                    {j.status === 'done' ? (
-                      <Badge tone="ok">{tr.done}</Badge>
-                    ) : j.status === 'waiting' ? (
-                      <Badge tone="warn">{j.errorKind ? `${tr.waiting} · ${tr.errors[j.errorKind]}` : tr.waiting}</Badge>
-                    ) : (
-                      <Badge tone="err">{j.errorKind ? `${tr.failed} · ${tr.errors[j.errorKind]}` : tr.failed}</Badge>
-                    )}
-                    {j.redoneBy !== null ? <Redo label={tr.redone} help={tr.redoneHelp} to={j.redoneBy} shown={new Set(all.map((x) => x.id))} jump={tr.toRedo} /> : null}
-                    {j.numberRetry ? <Redo label={tr.redo} help={tr.redoHelp} to={j.retryOf} shown={new Set(all.map((x) => x.id))} jump={tr.toFirst} /> : null}
-                    {j.retriedBy !== null && !j.canRetry ? (
-                      <Redo label={tr.retried} help={tr.retriedHelp} to={j.retriedBy} shown={new Set(all.map((x) => x.id))} jump={tr.toRetry} />
-                    ) : null}
-                    {j.status !== 'done' ? (
-                      <div className="ai-job-actions">
-                        {j.canRetry ? <RetryButton slug={slug} job={j} onRetried={jobs.reload} /> : null}
-                        <JobDetails slug={slug} job={j} />
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <ModelCell job={j} />
-                  </td>
-                  {/* Input counts the cached part too; the tooltip splits it. */}
-                  <td className="num" title={j.tokens ? tr.tokensDetail(j.tokens.input, j.tokens.cacheRead, j.tokens.cacheWrite, j.tokens.output) : undefined}>
-                    {j.tokens ? tr.tokensLine(j.tokens.input + j.tokens.cacheRead + j.tokens.cacheWrite, j.tokens.output) : '—'}
-                  </td>
-                  <td className="num">{j.costUsd === null ? '—' : `$${j.costUsd.toFixed(3)}`}</td>
-                  <td className="num">{j.durationMs === null ? '—' : took(j.durationMs)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {inQueue.length > 0 ? <InQueue slug={slug} jobs={inQueue} shown={shown} onChange={jobs.reload} onNotice={setNotice} /> : null}
+          {inQueue.length > 0 ? <h3>{tr.finished}</h3> : null}
+          {finished.length === 0 ? (
+            <p className="muted">{tr.empty}</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="data compact">
+                <thead>
+                  <tr>
+                    <th>{tr.job}</th>
+                    <th>{tr.when}</th>
+                    <th>{tr.status}</th>
+                    <th>{tr.model}</th>
+                    <th className="num">{tr.tokens}</th>
+                    <th className="num">{tr.cost}</th>
+                    <th className="num">{tr.took}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {finished.map((j) => (
+                    <tr key={j.id} id={`ai-job-${j.id}`}>
+                      <td>{jobName(j)}</td>
+                      <td>{formatDate(j.finishedAt, true)}</td>
+                      <td>
+                        {j.status === 'done' ? (
+                          <Badge tone="ok">{tr.done}</Badge>
+                        ) : (
+                          <Badge tone="err">{j.errorKind ? `${tr.failed} · ${tr.errors[j.errorKind]}` : tr.failed}</Badge>
+                        )}
+                        {j.redoneBy !== null ? <Redo label={tr.redone} help={tr.redoneHelp} to={j.redoneBy} shown={shown} jump={tr.toRedo} /> : null}
+                        {j.numberRetry ? <Redo label={tr.redo} help={tr.redoHelp} to={j.retryOf} shown={shown} jump={tr.toFirst} /> : null}
+                        {j.retriedBy !== null && !j.canRetry ? <Redo label={tr.retried} help={tr.retriedHelp} to={j.retriedBy} shown={shown} jump={tr.toRetry} /> : null}
+                        {j.status !== 'done' ? (
+                          <div className="ai-job-actions">
+                            {j.canRetry ? <RetryButton slug={slug} job={j} onRetried={jobs.reload} /> : null}
+                            <JobDetails slug={slug} job={j} />
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <ModelCell job={j} />
+                      </td>
+                      {/* Input counts the cached part too; the tooltip splits it. */}
+                      <td className="num" title={j.tokens ? tr.tokensDetail(j.tokens.input, j.tokens.cacheRead, j.tokens.cacheWrite, j.tokens.output) : undefined}>
+                        {j.tokens ? tr.tokensLine(j.tokens.input + j.tokens.cacheRead + j.tokens.cacheWrite, j.tokens.output) : '—'}
+                      </td>
+                      <td className="num">{j.costUsd === null ? '—' : `$${j.costUsd.toFixed(3)}`}</td>
+                      <td className="num">{j.durationMs === null ? '—' : took(j.durationMs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

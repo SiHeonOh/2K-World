@@ -536,6 +536,17 @@ export function createHandlers(deps: HandlerDeps): Handlers {
       if (sqliteJobStore(d).get(id)?.kind === 'read_box_score') return engine(() => ctx().gameday.retry(s, d, ctx().leagues.folderOf(s), id))
       return engine(() => ctx().ai.retry(s, d, ctx().leagues.folderOf(s), id))
     },
+    'ai.cancelJob': (slug, jobId) => {
+      const s = parse(slugSchema, slug, 'slug')
+      const d = ctx().leagues.dbFor(s)
+      const id = parse(idSchema, jobId, 'job')
+      engine(() => ctx().ai.cancel(s, d, ctx().leagues.folderOf(s), id))
+    },
+    'ai.cancelWaiting': (slug, kind) => {
+      const s = parse(slugSchema, slug, 'slug')
+      const k = parse(z.string().regex(/^[a-z_]{1,40}$/), kind, 'kind')
+      return ctx().ai.cancelWaiting(s, ctx().leagues.dbFor(s), ctx().leagues.folderOf(s), k)
+    },
     'ai.resume': (slug) => {
       const s = parse(slugSchema, slug, 'slug')
       return ctx().ai.resume(s, ctx().leagues.dbFor(s), ctx().leagues.folderOf(s))

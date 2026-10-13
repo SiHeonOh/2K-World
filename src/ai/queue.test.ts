@@ -6,6 +6,8 @@ import { recentJobs, sqliteJobStore } from '@data/jobs'
 import { DEFAULT_TIMEOUT_MS, ReplayAdapter, type JobResult } from './adapter'
 import {
   backoffMs,
+  CANCELLED_BY_YOU,
+  CancelRefused,
   DEFAULT_LIMIT_PAUSE_MS,
   errorPolicy,
   JobQueue,
@@ -652,10 +654,11 @@ describe('JobQueue: 다시 시도', () => {
     ])
     fail = false
     const c = queue.retry(b)
-    // c waits: neither a nor b can queue another.
+    // c waits (at the top of the list, in the queue): neither a nor b can queue another.
     expect(refusal(() => queue.retry(a))).toBe('job-retried')
     expect(refusal(() => queue.retry(b))).toBe('job-retried')
     expect(listed()).toEqual([
+      [c, false, null],
       [b, false, c],
       [a, false, b],
     ])
@@ -665,5 +668,168 @@ describe('JobQueue: 다시 시도', () => {
     // Done: still not twice.
     expect(refusal(() => queue.retry(a))).toBe('job-retried')
     expect(refusal(() => queue.retry(b))).toBe('job-retried')
+  })
+})
+
+describe('JobQueue: 취소', () => {
+  const refusal = (fn: () => unknown): string | null => {
+    try {
+      fn()
+    } catch (e) {
+      return e instanceof CancelRefused ? e.code : `not a refusal: ${String(e)}`
+    }
+    return null
+  }
+  const tick = () => new Promise((r) => setImmediate(r))
+
+  /** A queue whose runs wait for `release` (or end when aborted, with `endOnAbort`), as a long Claude Code run does. */
+  function slow(endOnAbort: boolean) {
+    const db = openDb(':memory:')
+    const store = sqliteJobStore(db)
+    const runs: { input: unknown; release: (r: JobResult) => void; aborted: boolean }[] = []
+    const adapter = new ReplayAdapter(
+      (req) =>
+        new Promise<JobResult>((resolve) => {
+          const run = { input: req.input, release: resolve, aborted: false }
+          runs.push(run)
+          req.signal?.addEventListener('abort', () => {
+            run.aborted = true
+            if (endOnAbort) resolve({ ok: false, error: 'failed', message: 'aborted' })
+          })
+        }),
+    )
+    const saved: number[] = []
+    const keep: JobKind<{ n: number }, { doubled: number }> = { ...echo, kind: 'keep', accept: (o) => void saved.push(o.doubled) }
+    const queue = new JobQueue(store, adapter, () => 'C:/tmp').register(echo).register(keep)
+    const changed: (number | null)[] = []
+    queue.onChange((_s, id) => changed.push(id))
+    return { db, store, queue, runs, saved, changed }
+  }
+
+  it('a waiting job leaves the queue unrun, marked as one you cancelled; the jobs around it still run', async () => {
+    const { queue, store, adapter } = setup([(n) => ok({ doubled: n })])
+    // Inserted without a kick, so all three wait.
+    const a = store.insert('echo', { n: 1 }, 0, null)
+    const b = store.insert('echo', { n: 2 }, 0, null)
+    const c = store.insert('echo', { n: 3 }, 0, null)
+    const seen: (number | null)[] = []
+    queue.onChange((_s, id) => seen.push(id))
+    queue.cancel(b)
+    expect(store.get(b)).toMatchObject({ status: 'cancelled', error: CANCELLED_BY_YOU, errorKind: null, attempts: 0 })
+    expect(store.get(b)!.finishedAt).not.toBeNull()
+    // Listeners hear of it, as of any change (held words, the draft, the 대기 중 list).
+    expect(seen).toEqual([b])
+    await queue.kick()
+    expect([a, b, c].map((id) => store.get(id)!.status)).toEqual(['done', 'cancelled', 'done'])
+    expect(adapter.calls.map((r) => r.input)).toEqual([{ n: 1 }, { n: 3 }])
+    expect(queue.status()).toMatchObject({ pausedUntil: null, failures: 0 })
+  })
+
+  it('a running job: its run is ended, a late answer is dropped, nothing pauses, and it never goes back in the queue', async () => {
+    const { queue, store, runs, saved, changed } = slow(false)
+    const a = queue.enqueue('keep', { n: 1 })
+    const b = queue.enqueue('keep', { n: 2 })
+    expect(store.get(a)!.status).toBe('running')
+    queue.cancel(a)
+    expect(runs[0]!.aborted).toBe(true)
+    expect(store.get(a)).toMatchObject({ status: 'cancelled', error: CANCELLED_BY_YOU })
+    expect(changed.at(-1)).toBe(a)
+    // Claude's answer lands anyway, before the run had really ended: it isn't stored, only what it used is kept.
+    runs[0]!.release({ ...ok({ doubled: 2 }), costUsd: 0.05 })
+    await tick()
+    expect(saved).toEqual([])
+    expect(store.get(a)).toMatchObject({ status: 'cancelled', output: null, attempts: 1, costUsd: 0.05 })
+    // The next job runs at once: no pause, no backoff.
+    expect(queue.status()).toMatchObject({ pausedUntil: null, pauseReason: null, failures: 0 })
+    expect(store.get(b)!.status).toBe('running')
+    runs[1]!.release(ok({ doubled: 4 }))
+    await queue.kick()
+    expect(saved).toEqual([4])
+    expect(store.get(a)!.status).toBe('cancelled')
+    queue.stop()
+  })
+
+  it('the failure its own ending causes counts for nothing: no try, no pause', async () => {
+    const { queue, store, runs } = slow(true)
+    const a = queue.enqueue('echo', { n: 1 })
+    queue.cancel(a)
+    await tick()
+    expect(store.get(a)).toMatchObject({ status: 'cancelled', errorKind: null, error: CANCELLED_BY_YOU })
+    expect(queue.status()).toMatchObject({ pausedUntil: null, pauseReason: null, failures: 0, running: null })
+    expect(runs).toHaveLength(1)
+    queue.stop()
+  })
+
+  it('closing the league while a cancelled run is still ending leaves it cancelled', async () => {
+    const { queue, store, runs } = slow(false)
+    const a = queue.enqueue('echo', { n: 1 })
+    queue.cancel(a)
+    queue.stop()
+    runs[0]!.release({ ok: false, error: 'failed', message: 'aborted' })
+    await tick()
+    expect(store.get(a)!.status).toBe('cancelled')
+    // The next open's queue leaves it be too.
+    new JobQueue(store, new ReplayAdapter(() => ok({ doubled: 0 })), () => '')
+    expect(store.get(a)!.status).toBe('cancelled')
+  })
+
+  it('refuses a job that is done, failed or cancelled already, and one that isn’t there', async () => {
+    const { queue, store } = setup([ok({ doubled: 2 }), { ok: false, error: 'model', message: 'no such model' }])
+    const done = queue.enqueue('echo', { n: 1 })
+    const failed = queue.enqueue('echo', { n: 2 })
+    await queue.kick()
+    const cancelled = store.insert('echo', { n: 3 }, 0, null)
+    queue.cancel(cancelled)
+    expect([done, failed, cancelled].map((id) => [store.get(id)!.status, refusal(() => queue.cancel(id))])).toEqual([
+      ['done', 'job-not-waiting'],
+      ['failed', 'job-not-waiting'],
+      ['cancelled', 'job-not-waiting'],
+    ])
+    expect(refusal(() => queue.cancel(999))).toBe('job-not-found')
+    // The refusals changed nothing.
+    expect(store.get(done)).toMatchObject({ status: 'done', error: null })
+    expect(store.get(failed)).toMatchObject({ status: 'failed', error: 'no such model' })
+  })
+
+  it('cancels every waiting job of one kind at once, not the one running nor other kinds', async () => {
+    const { queue, store, runs, changed } = slow(true)
+    const running = queue.enqueue('keep', { n: 1 })
+    const waiting = [2, 3, 4].map((n) => queue.enqueue('keep', { n }))
+    const other = queue.enqueue('echo', { n: 5 })
+    expect(queue.cancelWaiting('keep')).toBe(3)
+    expect(waiting.map((id) => store.get(id))).toMatchObject(waiting.map(() => ({ status: 'cancelled', error: CANCELLED_BY_YOU })))
+    expect(changed.slice(-3)).toEqual(waiting)
+    expect(store.get(running)!.status).toBe('running')
+    expect(store.get(other)!.status).toBe('queued')
+    expect(queue.cancelWaiting('keep')).toBe(0)
+    expect(queue.cancelWaiting('no_such_kind')).toBe(0)
+    runs[0]!.release(ok({ doubled: 2 }))
+    await tick()
+    expect(store.get(running)!.status).toBe('done')
+    expect(runs.map((r) => r.input)).toEqual([{ n: 1 }, { n: 5 }])
+    queue.stop()
+  })
+
+  it('최근 작업 lists running and waiting jobs first, never their input; a cancelled one leaves the list', async () => {
+    const { queue, store, db } = slow(true)
+    const a = queue.enqueue('echo', { n: 1, context: '비밀 전학' })
+    const b = queue.enqueue('echo', { n: 2, model: 'opus', effort: 'max', context: '비밀 전학' }, 5)
+    const c = queue.enqueue('keep', { n: 3, context: '비밀 전학' })
+    const listed = () => recentJobs(db).map((j) => [j.id, j.status])
+    // The running one, then the rest in the order they'd run (priority first).
+    expect(listed()).toEqual([
+      [a, 'running'],
+      [b, 'queued'],
+      [c, 'queued'],
+    ])
+    expect(recentJobs(db)[1]).toMatchObject({ askedModel: 'opus', askedEffort: 'max', startedAt: null, durationMs: null, queuedAt: store.get(b)!.createdAt })
+    expect(recentJobs(db)[0]!.startedAt).toBe(store.get(a)!.startedAt)
+    expect(JSON.stringify(recentJobs(db))).not.toContain('비밀')
+    queue.cancel(b)
+    queue.cancel(a)
+    expect(listed()).toEqual([[c, 'queued']])
+    await tick()
+    expect(store.get(c)!.status).toBe('running')
+    queue.stop()
   })
 })

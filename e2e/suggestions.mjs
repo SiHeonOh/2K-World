@@ -2,7 +2,9 @@
 // with the demo writer. Asks for AI drafts of one school's blank files, checks
 // nothing reaches a file before approval, approves one as it is, edits and
 // approves another, turns one down, approves the rest at once, asks for one
-// file's draft with a description, lets a finished round bring
+// file's draft with a description, cancels drafts still waiting (from 제안함,
+// then one by one in 편집실 → AI 모델, the running one too: TWOK_FAKE_HOLD
+// keeps the demo writer busy), lets a finished round bring
 // suggestions (nicknames set to approve themselves), and turns a secret the
 // news gave away into a 비밀 공개 card that moves it only once approved.
 // Run `npm run build` first.
@@ -138,6 +140,58 @@ await step('ask for one file’s draft with your own description', async () => {
   await page.click('.lore-editor-tools a:has-text("제안함으로")')
   await page.waitForSelector('.suggest-card p.help:has-text("말수는 적지만 4쿼터의 사나이")')
   await shot('sg05-one-draft')
+})
+
+await step('cancel the drafts still waiting from 제안함, then one by one in 편집실 → AI 모델', async () => {
+  // The demo writer takes its time with drafts now: the first one runs until it's ended, the rest wait behind it.
+  await app.evaluate(() => {
+    process.env.TWOK_FAKE_HOLD = 'lore_draft'
+  })
+  const pending = (await invoke('suggestions.status', slug)).pending
+  const asked = await invoke('suggestions.draft', slug, { scope: 'league' })
+  if (asked.jobs < 3) throw new Error(`expected a draft job per school, got ${asked.jobs}`)
+  await until('one draft running, the rest waiting', async () => {
+    const s = await invoke('suggestions.status', slug)
+    return s.drafting === asked.jobs && s.draftsQueued === asked.jobs - 1
+  })
+  await page.click('.nav a:has-text("인박스")')
+  await page.click('.segmented button:has-text("제안함")')
+  await page.waitForSelector(`text=AI 초안 ${asked.jobs}건 작성 중…`)
+  await shot('sg06a-drafts-waiting')
+  // It asks first (accepted here); the draft being written goes on.
+  await page.click('button:has-text("대기 중인 초안 취소")')
+  await page.waitForSelector(`text=대기 중이던 AI 초안 ${asked.jobs - 1}건을 취소했어요.`)
+  await page.waitForSelector('text=AI 초안 1건 작성 중…')
+  await page.waitForSelector('button:has-text("대기 중인 초안 취소")', { state: 'detached' })
+  const after = await invoke('suggestions.status', slug)
+  if (after.drafting !== 1 || after.draftsQueued !== 0 || after.pending !== pending) throw new Error(`after cancelling: ${JSON.stringify(after)}`)
+  await shot('sg06b-drafts-cancelled')
+
+  // One more draft waits behind the one being written: both are in 최근 작업's 대기 중, each with 취소.
+  const one = await invoke('suggestions.draft', slug, { scope: 'one', target: { kind: 'player', playerId: roster[3].id }, hint: '수비가 좋은 식스맨' })
+  if (one.jobs !== 1) throw new Error(`one draft: ${JSON.stringify(one)}`)
+  await page.click('.nav a:has-text("편집실")')
+  const running = page.locator('.ai-in-queue tbody tr:has-text("로어 초안"):has-text("실행 중")')
+  const waiting = page.locator('.ai-in-queue tbody tr:has-text("로어 초안"):has-text("차례 기다림")')
+  await running.waitFor()
+  await waiting.waitFor()
+  await page.waitForSelector('.ai-recent h3:has-text("대기 중")')
+  await shot('sg06c-in-queue')
+  await waiting.locator('button:text-is("취소")').click()
+  await waiting.waitFor({ state: 'detached' })
+  if ((await invoke('suggestions.status', slug)).draftsQueued !== 0) throw new Error('the waiting draft is still queued')
+  // The one being written: it asks first (accepted), then its run is ended.
+  await running.locator('button:text-is("취소")').click()
+  await running.waitFor({ state: 'detached' })
+  await until('no drafts left', async () => (await invoke('suggestions.status', slug)).drafting === 0)
+  await app.evaluate(() => {
+    delete process.env.TWOK_FAKE_HOLD
+  })
+  // Nothing was written for the cancelled drafts, and 최근 작업 lists none of them.
+  await page.waitForTimeout(1500)
+  if ((await invoke('suggestions.status', slug)).pending !== pending) throw new Error('a cancelled draft reached 제안함')
+  const left = (await invoke('ai.recentJobs', slug)).filter((j) => j.kind === 'lore_draft' && j.status !== 'done')
+  if (left.length) throw new Error(`cancelled drafts still listed: ${JSON.stringify(left)}`)
 })
 
 await step('set nicknames to approve themselves in 편집실', async () => {

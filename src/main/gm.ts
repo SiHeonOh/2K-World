@@ -21,6 +21,7 @@ import { GM_INTENT, GM_PRIORITY, GM_RESPOND, GMS_PER_CALL, intentInput, maybeClo
 import { autoPlay, DRAFT_PRIORITY, GM_PROTECT, GM_SWAP, protectInputs, readDraft, swapInput, swapOptions, type DraftData } from '@sim/draft'
 import { draftView } from '@data/moves'
 import { playerTradesOpen } from '@core/trades'
+import { CANCELLED_BY_YOU } from '@ai/queue'
 import type { AiService } from './ai'
 import { AppError } from './errors'
 
@@ -199,15 +200,20 @@ export class GmService {
     }
     // Recent gm_swap failures: the turns a failed batch covered are played by code, and after three
     // failures in a row code plays the rest, so a broken Claude can neither stall the draft nor keep spending.
+    // A batch you cancelled counts as one that failed: its turns aren't asked of Claude again.
     const recent = db
-      .prepare(`SELECT status, input FROM jobs WHERE kind = ? AND status IN ('done', 'failed') AND ${jsonField('input', '$.seasonId')} = ? ORDER BY id DESC LIMIT 3`)
-      .all(GM_SWAP, season.id) as { status: string; input: string }[]
+      .prepare(
+        `SELECT status, input FROM jobs WHERE kind = ? AND (status IN ('done', 'failed') OR (status = 'cancelled' AND error = ?))
+         AND ${jsonField('input', '$.seasonId')} = ? ORDER BY id DESC LIMIT 3`,
+      )
+      .all(GM_SWAP, CANCELLED_BY_YOU, season.id) as { status: string; input: string }[]
     let streak = 0
     for (const r of recent) {
-      if (r.status !== 'failed') break
+      if (r.status === 'done') break
       streak++
     }
     const covered = new Set<number>(streak > 0 ? (JSON.parse(recent[0]!.input) as { cards: { cardId: number }[] }).cards.map((c) => c.cardId) : [])
+    const coveredWhy = recent[0]?.status === 'cancelled' ? '작업이 취소돼 코드가 대신 골랐다.' : 'AI 응답이 없어 코드가 대신 골랐다.'
     const giveUp = !usable || streak >= 3
     let d: DraftData | null = null
     let played = false
@@ -218,7 +224,7 @@ export class GmService {
       if (owner?.control !== 'ai') break
       // The state is read once and again only after a move; deciding a turn is cheap.
       d ??= readDraft(db, folder)
-      const why = giveUp ? (usable ? 'AI 응답이 계속 실패해 코드가 진행했다.' : 'Claude를 쓸 수 없어 코드가 진행했다.') : covered.has(next.id) ? 'AI 응답이 없어 코드가 대신 골랐다.' : null
+      const why = giveUp ? (usable ? 'AI 응답이 계속 실패해 코드가 진행했다.' : 'Claude를 쓸 수 없어 코드가 진행했다.') : covered.has(next.id) ? coveredWhy : null
       if (why === null) {
         if (swapOptions(d, next.ownerTeamId, next.id, 1).length > 0) {
           const input = swapInput(db, folder)

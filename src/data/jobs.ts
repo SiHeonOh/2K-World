@@ -1,6 +1,6 @@
 import type { JobErrorKind } from '@ai/adapter'
 import { MANUAL_RETRY_OF, type JobRow, type JobStatus, type JobStore } from '@ai/queue'
-import { AI_JOB_OF_KIND, type RecentJob, type RunUsage, type TokenCounts } from '@shared/ai'
+import { AI_JOB_OF_KIND, IN_QUEUE_SHOWN, type RecentJob, type RunUsage, type TokenCounts } from '@shared/ai'
 import { jsonField, transaction, type Db } from './db'
 
 interface Row {
@@ -125,6 +125,9 @@ export function sqliteJobStore(db: Db): JobStore {
     requeueRunning() {
       db.prepare("UPDATE jobs SET status = 'queued' WHERE status = 'running'").run()
     },
+    queuedOf(kind) {
+      return (db.prepare("SELECT id FROM jobs WHERE status = 'queued' AND kind = ? ORDER BY priority DESC, id").all(kind) as { id: number }[]).map((r) => r.id)
+    },
     atomically(fn) {
       return transaction(db, fn)
     },
@@ -215,14 +218,14 @@ export function listJobs(db: Db, limit = 50): JobRow[] {
 }
 
 /** What the list reads of a job: never its input, output or error text. */
-const RECENT_COLUMNS = `id, kind, status, error_kind, cost_usd, model, tokens, started_at,
+const RECENT_COLUMNS = `id, kind, status, error_kind, cost_usd, model, tokens, created_at, started_at,
   COALESCE(asked_model, CASE WHEN json_valid(input) THEN json_extract(input, '$.model') END) AS asked_model,
   COALESCE(asked_effort, CASE WHEN json_valid(input) THEN json_extract(input, '$.effort') END) AS asked_effort,
   CASE WHEN json_valid(input) THEN json_type(input, '$.numberRetry') IS NOT NULL ELSE 0 END AS number_retry,
   CASE WHEN json_valid(input) THEN json_extract(input, '$.retryOf') END AS retry_of,
   CASE WHEN json_valid(input) AND input <> '{}' THEN 1 ELSE 0 END AS input_kept`
 
-type RecentRow = Pick<Row, 'id' | 'kind' | 'error_kind' | 'cost_usd' | 'model' | 'tokens' | 'started_at' | 'asked_model' | 'asked_effort'> & {
+type RecentRow = Pick<Row, 'id' | 'kind' | 'error_kind' | 'cost_usd' | 'model' | 'tokens' | 'created_at' | 'started_at' | 'asked_model' | 'asked_effort'> & {
   status: JobStatus
   finished_at: string
   number_retry: number
@@ -230,12 +233,11 @@ type RecentRow = Pick<Row, 'id' | 'kind' | 'error_kind' | 'cost_usd' | 'model' |
   input_kept: number
 }
 
-/** At most this many jobs waiting after a failed try lead the list. */
-const WAITING_SHOWN = 10
-
 /**
- * The latest finished jobs (done or failed), newest first, for 편집실 → AI 모델,
- * after the jobs waiting to try again after a failed try (when their last try started).
+ * For 편집실 → AI 모델 → 최근 작업: first the jobs still in the queue (대기
+ * 중: the running one, then the rest in the order they'd run, each with when
+ * it was queued and when its last try started), then the latest finished jobs
+ * (done or failed), newest first.
  * `+status` keeps SQLite off the status index, so it walks `jobs_by_finish`
  * in order instead of sorting every finished job.
  * Only what the list shows is read: never the input, output or error text.
@@ -247,9 +249,9 @@ export function recentJobs(db: Db, limit = 30, retryable: (kind: string) => bool
   const waiting = db
     .prepare(
       `SELECT ${RECENT_COLUMNS}, COALESCE(started_at, created_at) AS finished_at
-       FROM jobs WHERE status = 'queued' AND error_kind IS NOT NULL ORDER BY id LIMIT ?`,
+       FROM jobs WHERE status IN ('running', 'queued') ORDER BY status = 'running' DESC, priority DESC, id LIMIT ?`,
     )
-    .all(WAITING_SHOWN) as unknown as RecentRow[]
+    .all(IN_QUEUE_SHOWN) as unknown as RecentRow[]
   const finished = db
     .prepare(
       `SELECT ${RECENT_COLUMNS}, finished_at
@@ -274,8 +276,9 @@ export function recentJobs(db: Db, limit = 30, retryable: (kind: string) => bool
   }
   const text = (v: unknown) => (typeof v === 'string' && v ? v : null)
   return rows.map((r) => {
-    const status = r.status === 'done' || r.status === 'failed' ? r.status : 'waiting'
-    const took = r.started_at === null || status === 'waiting' ? NaN : Date.parse(r.finished_at) - Date.parse(r.started_at)
+    // In the queue: running, waiting its turn, or waiting to try again after a failed try.
+    const status = r.status === 'done' || r.status === 'failed' || r.status === 'running' ? r.status : r.error_kind !== null ? 'waiting' : 'queued'
+    const took = r.started_at === null || (status !== 'done' && status !== 'failed') ? NaN : Date.parse(r.finished_at) - Date.parse(r.started_at)
     const tokens: TokenCounts | null = usageOf(r.model, r.tokens)?.total ?? null
     const chain = chains.get(r.id)
     return {
@@ -291,6 +294,8 @@ export function recentJobs(db: Db, limit = 30, retryable: (kind: string) => bool
       model: r.model,
       tokens,
       costUsd: r.cost_usd,
+      queuedAt: r.created_at,
+      startedAt: r.started_at,
       finishedAt: r.finished_at,
       durationMs: Number.isFinite(took) && took >= 0 ? took : null,
       numberRetry: r.number_retry === 1,

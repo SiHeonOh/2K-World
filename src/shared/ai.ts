@@ -90,18 +90,24 @@ export const AI_JOB_OF_KIND: Readonly<Record<string, AiJob>> = {
   gm_swap: 'gmDraft',
 }
 
+/** At most this many jobs still in the queue lead 최근 작업 (the ones that run first). */
+export const IN_QUEUE_SHOWN = 100
+
 /**
- * One AI job for 편집실 → AI 모델's 최근 작업: finished, or waiting to try
- * again after a failed try. It never carries the job's input, output or
- * error text: those can hold league lore (`ai.jobError` reads the error on request).
+ * One AI job for 편집실 → AI 모델's 최근 작업: still in the queue (대기 중),
+ * or finished. It never carries the job's input, output or error text: those
+ * can hold league lore (`ai.jobError` reads the error on request).
  */
 export interface RecentJob {
   id: number
   kind: string
   /** The AI 모델 row it ran under; null for a kind this list doesn't know. */
   job: AiJob | null
-  /** 'waiting': its last try failed and it waits in the queue for another. */
-  status: 'done' | 'failed' | 'waiting'
+  /**
+   * In the queue: 'running' now, 'queued' for its turn, or 'waiting': its last
+   * try failed and it waits for another. Finished: 'done' or 'failed'.
+   */
+  status: 'running' | 'queued' | 'waiting' | 'done' | 'failed'
   errorKind: AiErrorKind | null
   /** A failed job that 다시 시도 can queue again (its input is still kept and nothing retried it yet). */
   canRetry: boolean
@@ -116,9 +122,13 @@ export interface RecentJob {
   tokens: TokenCounts | null
   /** Claude Code's own estimate; the subscription isn't billed per job. */
   costUsd: number | null
-  /** When it finished; for a waiting job, when its last try started. */
+  /** When it was queued. */
+  queuedAt: string
+  /** When its last try started (a running job: this one); null when it never ran. */
+  startedAt: string | null
+  /** When it finished; for a job still in the queue, when its last try started, or when it was queued. */
   finishedAt: string
-  /** From its last start to the finish (a retry starts the clock again); null while waiting. */
+  /** From its last start to the finish (a retry starts the clock again); null while in the queue. */
   durationMs: number | null
   /**
    * The number check's redo: `retryOf` is the job it redoes (null when it

@@ -208,12 +208,16 @@ export interface Api {
   'ai.recheck': () => AiStatus
   /** Every AI job's model and effort (편집실 → AI 모델). */
   'ai.saveJobs': (slug: string, ai: AiConfig) => { version: number }
-  /** The latest finished AI jobs: the model asked for and the one that answered, tokens, cost, time. Never their inputs. */
+  /** The jobs in the queue, then the latest finished ones: the model asked for and the one that answered, tokens, cost, time. Never their inputs. */
   'ai.recentJobs': (slug: string) => RecentJob[]
   /** One job's error text, as Claude Code (or the app) put it, for 최근 작업's 자세히. */
   'ai.jobError': (slug: string, jobId: number) => { error: string | null }
   /** Queues a failed job again as a new job (same input, on its AI 모델 row's model and effort now). */
   'ai.retryJob': (slug: string, jobId: number) => { jobId: number }
+  /** 취소: a waiting job never runs; a running one is ended and its answer dropped. Refused once it's done, failed or cancelled. */
+  'ai.cancelJob': (slug: string, jobId: number) => void
+  /** Cancels every waiting job of one kind (not the one running); returns how many. */
+  'ai.cancelWaiting': (slug: string, kind: string) => { cancelled: number }
   /** 지금 다시 시도: ends the league queue's pause now (a block gets a fresh check first). */
   'ai.resume': (slug: string) => AiStatus
   'gameday.saveImage': (slug: string, bytes: Uint8Array) => { token: string }
@@ -402,6 +406,8 @@ export const API_CHANNELS = [
   'ai.recentJobs',
   'ai.jobError',
   'ai.retryJob',
+  'ai.cancelJob',
+  'ai.cancelWaiting',
   'ai.resume',
   'gameday.saveImage',
   'gameday.discardImage',
@@ -531,11 +537,12 @@ export const OPEN_DROPPED_CHANNEL = 'import.openDropped'
  * waiting for a poll. They carry no data: the screen asks for what it shows.
  */
 export const PUSH_CHANNEL = 'twok:push'
-export type PushTopic = 'community' | 'wiki' | 'gm' | 'inbox' | 'gameday' | 'other' | 'jobs'
+/** 'waiting': a job was queued, started, put back or cancelled (only 최근 작업's 대기 중 listens). */
+export type PushTopic = 'community' | 'wiki' | 'gm' | 'inbox' | 'gameday' | 'other' | 'jobs' | 'waiting'
 export interface PushNote {
   slug: string
   topic: PushTopic
-  /** The job kind that finished. */
+  /** The job kind that finished (or, for 'waiting', changed). */
   kind: string
 }
 

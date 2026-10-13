@@ -192,6 +192,60 @@ describe('what the review found', () => {
     expect(gm.status('test', db, dir).draft).toMatchObject({ waitingFor: next.ownerTeamId })
   })
 
+  it('a batch you cancel is played by code, as a failed one is; then Claude gets the next turn', async () => {
+    story.afterChange('test', db, dir)
+    await drain()
+    closeProtection(db)
+    // Claude takes its time: the batch is still being written when you cancel it.
+    process.env.TWOK_FAKE_HOLD = 'gm_swap'
+    try {
+      story.afterChange('test', db, dir)
+      const batch = db.prepare("SELECT id, status, input FROM jobs WHERE kind = 'gm_swap'").get() as { id: number; status: string; input: string }
+      expect(batch.status).toBe('running')
+      const next = draftView(db).next!
+      expect((JSON.parse(batch.input) as { cards: { cardId: number }[] }).cards[0]!.cardId).toBe(next.id)
+      ai.cancel('test', db, dir, batch.id)
+      // The draft moves on once the change is heard.
+      await new Promise((r) => setImmediate(r))
+      // Code played the turn it covered, saying why; nothing of its own answer landed.
+      expect(db.prepare('SELECT note, job_id FROM draft_notes WHERE card_id = ?').get(next.id)).toEqual({ note: '작업이 취소돼 코드가 대신 골랐다.', job_id: null })
+      expect(db.prepare('SELECT COUNT(*) AS n FROM draft_notes WHERE job_id = ?').get(batch.id)).toEqual({ n: 0 })
+      // Claude gets the next turn.
+      const swaps = jobs('gm_swap')
+      expect(swaps.map((j) => j.status)).toEqual(['cancelled', 'running'])
+      expect((JSON.parse(swaps[1]!.input) as { cards: { cardId: number }[] }).cards[0]!.cardId).toBe(draftView(db).next!.id)
+    } finally {
+      delete process.env.TWOK_FAKE_HOLD
+    }
+  })
+
+  it('protection jobs you cancel are tried once more, as failed ones are, and never stall the draft', async () => {
+    const live = () => (db.prepare("SELECT id FROM jobs WHERE kind = 'gm_protect' AND status IN ('queued', 'running')").all() as { id: number }[]).map((r) => r.id)
+    process.env.TWOK_FAKE_HOLD = 'gm_protect'
+    try {
+      story.afterChange('test', db, dir)
+      const first = live()
+      expect(first.length).toBeGreaterThan(0)
+      for (const id of first) ai.cancel('test', db, dir, id)
+      await new Promise((r) => setImmediate(r))
+      // The second (and last) try, for the teams that haven't decided.
+      const second = live()
+      expect(second.length).toBeGreaterThan(0)
+      expect(second.filter((id) => first.includes(id))).toEqual([])
+      for (const id of second) ai.cancel('test', db, dir, id)
+      await new Promise((r) => setImmediate(r))
+      expect(live()).toEqual([])
+      expect(gm.status('test', db, dir).draft).toMatchObject({ working: 0, stuck: false })
+    } finally {
+      delete process.env.TWOK_FAKE_HOLD
+    }
+    // Once you close protection, the picks go on.
+    closeProtection(db)
+    story.afterChange('test', db, dir)
+    await drain(40)
+    expect(draftView(db).next).toBeNull()
+  })
+
   it('after three failures in a row, code plays the rest', () => {
     story.afterChange('test', db, dir)
     closeProtection(db)

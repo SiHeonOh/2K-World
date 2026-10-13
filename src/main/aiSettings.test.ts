@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,9 @@ import { z } from 'zod'
 import { openDb } from '@data/db'
 import { sqliteJobStore } from '@data/jobs'
 import { claudeArgs, ReplayAdapter } from '@ai/adapter'
-import { JobQueue, type JobKind } from '@ai/queue'
+import { CANCELLED_BY_YOU, JobQueue, type JobKind } from '@ai/queue'
+import { currentSeason, listEvents } from '@data/league'
+import { ko } from '../renderer/i18n/ko'
 import { AI_JOB_OF_KIND, type RecentJob, type RunUsage } from '@shared/ai'
 import { sampleConfig, sampleSetup } from '@shared/testing/fixtures'
 import { migrateConfig } from '@shared/config/migrations'
@@ -178,14 +180,28 @@ describe('recent AI jobs (편집실 → AI 모델)', () => {
     // Finished before the app recorded what it asked for: that comes from its input.
     const swap = finished('gm_swap', { model: 'haiku', effort: 'low', context: secret }, { status: 'done', finishedAt: '2026-10-09T09:00:00.000Z' })
     const odd = finished('mystery_kind', {}, { status: 'done', startedAt: '2026-10-08T00:00:05.000Z', finishedAt: '2026-10-08T00:00:00.000Z' })
-    // Not finished, or never run: left out.
+    // Cancelled: left out. Never run yet: still in the queue, so it leads the list (대기 중).
     finished('chatter_batch', { context: secret }, { status: 'cancelled', finishedAt: '2026-10-11T00:00:00.000Z' })
-    store.insert('reply_to_user', { context: secret }, 60, null)
+    const reply = store.insert('reply_to_user', { context: secret }, 60, null)
+    const queuedAt = (id: number) => store.get(id)!.createdAt
 
     const list = await handlers()['ai.recentJobs']('test-league')
     const first = { numberRetry: false, retryOf: null, redoneBy: null, canRetry: false, retriedBy: null }
     const none = { costUsd: null, model: null, tokens: null, errorKind: null, ...first }
     expect(list).toEqual<RecentJob[]>([
+      {
+        id: reply,
+        kind: 'reply_to_user',
+        job: 'reply',
+        status: 'queued',
+        ...none,
+        askedModel: null,
+        askedEffort: null,
+        queuedAt: queuedAt(reply),
+        startedAt: null,
+        finishedAt: queuedAt(reply),
+        durationMs: null,
+      },
       {
         id: pushback,
         kind: 'wiki_pushback',
@@ -197,6 +213,8 @@ describe('recent AI jobs (편집실 → AI 모델)', () => {
         canRetry: true,
         askedModel: 'opus',
         askedEffort: null,
+        queuedAt: queuedAt(pushback),
+        startedAt: '2026-10-10T11:00:00.000Z',
         finishedAt: '2026-10-10T11:02:05.000Z',
         durationMs: 125_000,
       },
@@ -211,13 +229,39 @@ describe('recent AI jobs (편집실 → AI 모델)', () => {
         model: 'claude-sonnet-4-6',
         tokens: usage.total,
         costUsd: 0.0123,
+        queuedAt: queuedAt(thread),
+        startedAt: '2026-10-10T10:00:00.000Z',
         finishedAt: '2026-10-10T10:00:42.500Z',
         durationMs: 42_500,
         ...first,
       },
-      { id: swap, kind: 'gm_swap', job: 'gmDraft', status: 'done', ...none, askedModel: 'haiku', askedEffort: 'low', finishedAt: '2026-10-09T09:00:00.000Z', durationMs: null },
+      {
+        id: swap,
+        kind: 'gm_swap',
+        job: 'gmDraft',
+        status: 'done',
+        ...none,
+        askedModel: 'haiku',
+        askedEffort: 'low',
+        queuedAt: queuedAt(swap),
+        startedAt: null,
+        finishedAt: '2026-10-09T09:00:00.000Z',
+        durationMs: null,
+      },
       // An unknown kind keeps its raw name; a clock that ran backwards gives no time.
-      { id: odd, kind: 'mystery_kind', job: null, status: 'done', ...none, askedModel: null, askedEffort: null, finishedAt: '2026-10-08T00:00:00.000Z', durationMs: null },
+      {
+        id: odd,
+        kind: 'mystery_kind',
+        job: null,
+        status: 'done',
+        ...none,
+        askedModel: null,
+        askedEffort: null,
+        queuedAt: queuedAt(odd),
+        startedAt: '2026-10-08T00:00:05.000Z',
+        finishedAt: '2026-10-08T00:00:00.000Z',
+        durationMs: null,
+      },
     ])
     expect(JSON.stringify(list)).not.toContain('비밀')
     for (const row of list) expect(row).not.toHaveProperty('input')
@@ -231,11 +275,12 @@ describe('recent AI jobs (편집실 → AI 모델)', () => {
       { id: redid, numberRetry: false, retryOf: null, redoneBy: redo },
     ])
 
-    // About 30 at most.
+    // About 30 finished at most, after the job still waiting.
     for (let i = 0; i < 35; i++) finished('wiki_edits', { model: 'sonnet' }, { status: 'done', finishedAt: `2026-10-11T01:${String(i).padStart(2, '0')}:00.000Z` })
     const capped = await handlers()['ai.recentJobs']('test-league')
-    expect(capped).toHaveLength(30)
-    expect(capped[0]).toMatchObject({ kind: 'wiki_edits', job: 'wiki', finishedAt: '2026-10-11T01:34:00.000Z' })
+    expect(capped).toHaveLength(31)
+    expect(capped[0]).toMatchObject({ id: reply, status: 'queued' })
+    expect(capped[1]).toMatchObject({ kind: 'wiki_edits', job: 'wiki', finishedAt: '2026-10-11T01:34:00.000Z' })
 
     await expect(Promise.resolve().then(() => handlers()['ai.recentJobs'](42))).rejects.toMatchObject({ code: 'invalid-input' })
   })
@@ -255,19 +300,27 @@ describe('recent AI jobs (편집실 → AI 모델)', () => {
     return id
   }
 
-  it('puts jobs waiting after a failed try first, and reads one job’s error only when asked', async () => {
+  it('puts the jobs still in the queue first (running, then in the order they’d run), and reads one job’s error only when asked', async () => {
     const store = sqliteJobStore(ctx.leagues.dbFor('test-league'))
     const done = store.insert('wiki_edits', { model: 'sonnet' }, 0, null)
     store.update(done, { status: 'done', startedAt: '2026-10-10T09:59:00.000Z', finishedAt: '2026-10-10T10:00:00.000Z' })
     const waiting = store.insert('chatter_batch', { model: 'sonnet', context: '비밀' }, 0, null)
     store.update(waiting, { status: 'queued', error: 'API Error: Connection error.', errorKind: 'offline', startedAt: '2026-10-10T11:00:00.000Z' })
-    // Never tried yet: not listed.
-    store.insert('reply_to_user', { model: 'haiku' }, 60, null)
+    // Never tried yet: waiting its turn, ahead of the chatter (a higher priority).
+    const reply = store.insert('reply_to_user', { model: 'haiku', effort: 'low', context: '비밀' }, 60, null)
+    const running = store.insert('lore_draft', { model: 'opus', effort: 'max', context: '비밀' }, 20, null)
+    store.update(running, { status: 'running', startedAt: '2026-10-10T12:00:00.000Z' })
     const list = await handlers()['ai.recentJobs']('test-league')
-    expect(list.map((j) => [j.id, j.status, j.errorKind, j.canRetry, j.finishedAt, j.durationMs])).toEqual([
-      [waiting, 'waiting', 'offline', false, '2026-10-10T11:00:00.000Z', null],
-      [done, 'done', null, false, '2026-10-10T10:00:00.000Z', 60_000],
+    expect(list.map((j) => [j.id, j.status, j.errorKind, j.canRetry, j.startedAt, j.durationMs, j.askedModel, j.askedEffort])).toEqual([
+      [running, 'running', null, false, '2026-10-10T12:00:00.000Z', null, 'opus', 'max'],
+      [reply, 'queued', null, false, null, null, 'haiku', 'low'],
+      [waiting, 'waiting', 'offline', false, '2026-10-10T11:00:00.000Z', null, 'sonnet', null],
+      [done, 'done', null, false, '2026-10-10T09:59:00.000Z', 60_000, 'sonnet', null],
     ])
+    expect(list.find((j) => j.id === waiting)!.finishedAt).toBe('2026-10-10T11:00:00.000Z')
+    expect(list.find((j) => j.id === reply)!.queuedAt).toBe(store.get(reply)!.createdAt)
+    // Never a job's input (its context holds lore).
+    expect(JSON.stringify(list)).not.toContain('비밀')
     expect(JSON.stringify(list)).not.toContain('Connection error')
     expect(await handlers()['ai.jobError']('test-league', waiting)).toEqual({ error: 'API Error: Connection error.' })
     expect(await handlers()['ai.jobError']('test-league', done)).toEqual({ error: null })
@@ -305,6 +358,45 @@ describe('recent AI jobs (편집실 → AI 모델)', () => {
     const read = failedJob('read_box_score', { images: ['1.png'], teams: ['가', '나'], gameId: 9999, model: 'sonnet' }, 50)
     expect(await rejection(() => h['ai.retryJob']('test-league', read))).toMatchObject({ code: 'rule', rules: [{ code: 'unknown-game' }] })
     expect(await rejection(() => h['ai.retryJob']('test-league', 9999))).toMatchObject({ code: 'rule', rules: [{ code: 'job-not-found' }] })
+  })
+
+  it('취소 takes a waiting job out of the queue, or every waiting one of a kind; a finished one is refused', async () => {
+    const h = handlers()
+    const store = sqliteJobStore(ctx.leagues.dbFor('test-league'))
+    // Inserted without a kick: they wait.
+    const drafts = [1, 2, 3].map(() => store.insert('lore_draft', { model: 'opus', effort: 'max', context: '' }, 20, null))
+    const reply = store.insert('reply_to_user', { model: 'haiku', context: '' }, 60, null)
+    await h['ai.cancelJob']('test-league', drafts[0]!)
+    expect(store.get(drafts[0]!)).toMatchObject({ status: 'cancelled', error: CANCELLED_BY_YOU })
+    expect(await h['ai.cancelWaiting']('test-league', 'lore_draft')).toEqual({ cancelled: 2 })
+    expect(drafts.map((id) => store.get(id)!.status)).toEqual(['cancelled', 'cancelled', 'cancelled'])
+    // Only the reply is left in the queue (waiting: this PC has no Claude Code), and cancelled jobs aren't listed.
+    expect((await h['ai.recentJobs']('test-league')).map((j) => j.id)).toEqual([reply])
+    expect(await rejection(() => h['ai.cancelJob']('test-league', drafts[0]!))).toMatchObject({ code: 'rule', rules: [{ code: 'job-not-waiting' }] })
+    expect(await rejection(() => h['ai.cancelJob']('test-league', 9999))).toMatchObject({ code: 'rule', rules: [{ code: 'job-not-found' }] })
+    expect(await rejection(() => h['ai.cancelWaiting']('test-league', "lore_draft' OR 1"))).toMatchObject({ code: 'invalid-input' })
+    expect(store.get(reply)!.status).toBe('queued')
+    expect(store.get(reply)!.error).not.toBe(CANCELLED_BY_YOU)
+  })
+
+  it('취소 of a players’ words retry puts the words it held out as news, as a failure does', async () => {
+    const db = ctx.leagues.dbFor('test-league')
+    // The league's queue is running (and finds nothing); the retry is put in without a kick, so it waits.
+    ctx.ai.queueFor('test-league', db, ctx.leagues.folderOf('test-league'))
+    const seasonId = currentSeason(db).id
+    const held = { quoteId: 901, playerId: 'p2', teamId: 't1', channel: 'interview', quote: '열심히 하겠습니다', action: 'none', targetId: null }
+    const players = [{ key: 'P1', playerId: 'p1', teamId: 't1', causes: ['트레이드'], weight: 3 }]
+    const retry = sqliteJobStore(db).insert('player_reaction', { model: 'sonnet', seasonId, context: '', players, retry: true, only: ['P1'], held: [held] }, 22, null)
+    expect(listEvents(db, 'player_said')).toEqual([])
+    await handlers()['ai.cancelJob']('test-league', retry)
+    expect(listEvents(db, 'player_said').map((e) => e.payload)).toEqual([held])
+  })
+
+  it('explains every refusal of 다시 시도 and 취소', () => {
+    const source = readFileSync(join(__dirname, '../ai/queue.ts'), 'utf8')
+    const codes = [...source.matchAll(/new (?:Retry|Cancel)Refused\('([a-z-]+)'\)/g)].map((m) => m[1]!)
+    expect(codes).toEqual(expect.arrayContaining(['job-not-failed', 'job-not-wanted', 'job-not-waiting', 'job-not-found']))
+    for (const code of codes) expect((ko.rules as Record<string, unknown>)[code], code).toBeDefined()
   })
 })
 

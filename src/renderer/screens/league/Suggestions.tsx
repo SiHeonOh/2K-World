@@ -90,6 +90,11 @@ export function SuggestionInbox({ onCount }: { onCount?: (n: number) => void }) 
       return ts.approveAllResult(r.approved, r.failed)
     })
   }
+  // Drafts not started yet leave the queue; the one being written finishes.
+  const cancelDrafts = (waiting: number, running: number) => {
+    if (!window.confirm(ts.confirmCancelDrafts(waiting, running))) return
+    void act(async () => ts.draftsCancelled((await call('ai.cancelWaiting', league.slug, 'lore_draft')).cancelled))
+  }
   const always = (kind: SuggestionKind) => {
     if (!window.confirm(ts.confirmAlways(ts.kinds[kind]!))) return
     void act(async () => {
@@ -107,6 +112,11 @@ export function SuggestionInbox({ onCount }: { onCount?: (n: number) => void }) 
       {status.state === 'ready' && status.value.drafting > 0 ? (
         <div className="row muted">
           <span className="spin" /> {ts.drafting(status.value.drafting)}
+          {status.value.draftsQueued > 0 ? (
+            <button className="btn small ghost" disabled={busy} onClick={() => cancelDrafts(status.value.draftsQueued, status.value.drafting - status.value.draftsQueued)}>
+              {ts.cancelDrafts}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {status.state === 'ready' && status.value.sweeping > 0 ? (

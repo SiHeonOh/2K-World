@@ -119,6 +119,8 @@ export interface SuggestionStatusView {
   pending: number
   /** lore_draft jobs waiting or running. */
   drafting: number
+  /** Of those, the ones still waiting their turn (대기 중인 초안 취소 cancels these; the running one finishes). */
+  draftsQueued: number
   /** Round jobs (lore_suggest, lore_reveal) waiting or running. */
   sweeping: number
   aiReady: boolean

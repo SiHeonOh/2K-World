@@ -78,6 +78,8 @@ export interface JobStore {
   ): void
   /** Running jobs left over from a crash go back to the queue. */
   requeueRunning(): void
+  /** The queued jobs of one kind (not one running now), in the order they'd run. */
+  queuedOf(kind: string): number[]
   /** Runs `fn` in one transaction, so a stored result and "done" land together or not at all. */
   atomically?<T>(fn: () => T): T
   /**
@@ -174,6 +176,20 @@ export class RetryRefused extends Error {
   }
 }
 
+/** Why a job can't be cancelled (it's done, failed or cancelled already); shown to the user as a refusal. */
+export class CancelRefused extends Error {
+  constructor(readonly code: 'job-not-found' | 'job-not-waiting') {
+    super(`cancel refused: ${code}`)
+  }
+}
+
+/**
+ * The error a job you cancelled carries (취소 in 최근 작업, 대기 중인 초안
+ * 취소 in 제안함). Code that plays a turn whose job failed reads it, so a job
+ * you cancelled counts as one that didn't answer (the AI draft).
+ */
+export const CANCELLED_BY_YOU = '사용자가 취소함'
+
 export type { QueueState }
 
 const idleState = (): QueueState => ({ running: null, pausedUntil: null, pauseReason: null, blocked: null, detail: null, failures: 0 })
@@ -187,6 +203,8 @@ export class JobQueue {
   private timer: ReturnType<typeof setTimeout> | null = null
   private stopped = false
   private current: { job: JobRow; controller: AbortController } | null = null
+  /** The running job when you cancelled it: its run is ended and whatever it answers is dropped. */
+  private dropped: number | null = null
   /**
    * One job whose own run fails like a network problem (a long run the API
    * times out, say) would otherwise wait at the head of the queue forever.
@@ -313,6 +331,48 @@ export class JobQueue {
   }
 
   /**
+   * 취소: a waiting job leaves the queue unrun. A running one has its Claude
+   * Code run ended as stop() ends it, and whatever it answers is dropped.
+   * Either way it's marked cancelled, as a job `stillWanted` turns away is:
+   * never put back, no try counted, no pause. The change goes to the
+   * listeners like any other, so work that waits on the job carries on as it
+   * would after a failure (held words, the draft). Throws CancelRefused for a
+   * job that's done, failed or cancelled already.
+   */
+  cancel(id: number): void {
+    if (this.stopped) throw new Error('the job queue is stopped')
+    const job = this.store.get(id)
+    if (!job) throw new CancelRefused('job-not-found')
+    if (job.status !== 'queued' && job.status !== 'running') throw new CancelRefused('job-not-waiting')
+    this.store.update(id, { status: 'cancelled', error: CANCELLED_BY_YOU, finishedAt: new Date(this.now()).toISOString() })
+    this.forget(id)
+    const current = this.current
+    if (current?.job.id === id) {
+      this.dropped = id
+      current.controller.abort()
+    }
+    this.emit(id)
+  }
+
+  /** Cancels every waiting job of one kind at once (not one running now; see cancel). Returns how many. */
+  cancelWaiting(kind: string): number {
+    if (this.stopped) throw new Error('the job queue is stopped')
+    const ids = this.store.queuedOf(kind)
+    if (ids.length === 0) return 0
+    const finishedAt = new Date(this.now()).toISOString()
+    const mark = () => {
+      for (const id of ids) this.store.update(id, { status: 'cancelled', error: CANCELLED_BY_YOU, finishedAt })
+    }
+    if (this.store.atomically) this.store.atomically(mark)
+    else mark()
+    for (const id of ids) {
+      this.forget(id)
+      this.emit(id)
+    }
+    return ids.length
+  }
+
+  /**
    * Runs queued jobs until none are left (or the queue is paused). Resolves
    * when idle. A kick during a pass makes the pass look again before it ends;
    * the pass clears itself in the same step it finishes, so no kick is lost.
@@ -349,7 +409,8 @@ export class JobQueue {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     const current = this.current
-    if (current) {
+    // One you cancelled stays cancelled, though its run is still ending.
+    if (current && this.dropped !== current.job.id) {
       try {
         this.store.update(current.job.id, { status: 'queued', attempts: current.job.attempts })
       } catch {
@@ -491,6 +552,14 @@ export class JobQueue {
 
     // What this run asked for and used, kept whatever the outcome (a retry adds to the first try).
     const spent = { ...asked, costUsd: addCost(job.costUsd, result.costUsd), usage: mergeUsage(job.usage, result.usage) }
+
+    // Cancelled while running: cancel() already marked it. Its answer (or the failure its ending caused) is dropped:
+    // nothing is stored, nothing counts against the queue; only what the run used is kept on the row.
+    if (this.dropped === job.id) {
+      this.dropped = null
+      this.store.update(job.id, spent)
+      return
+    }
 
     if (result.ok) {
       // Claude answered, so whatever paused the queue before has passed.

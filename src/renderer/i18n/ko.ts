@@ -961,6 +961,8 @@ export const ko = {
     'job-input-gone': () => '오래된 작업이라 내용이 지워져서 다시 시도할 수 없어요',
     'job-retried': () => '이미 다시 시도한 작업이에요',
     'job-not-wanted': () => '그 사이 상황이 바뀌어서 이 작업은 이제 필요 없어요',
+    // 취소 of an AI job in the queue (최근 작업's 대기 중).
+    'job-not-waiting': () => '이미 끝났거나 취소된 작업이에요',
     'unknown-board': () => '게시판을 찾을 수 없어요',
     'unknown-post': () => '글을 찾을 수 없어요',
     'empty-post': () => '내용을 입력하세요',

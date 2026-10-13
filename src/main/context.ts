@@ -145,12 +145,14 @@ export function createContext(dataDir: string, defaultsDir: string, appVersion: 
     }
   })
   // A job that finished with something saved tells the open screens (new posts, comments, edits);
-  // any finished job, failed ones too, tells the 최근 작업 list.
+  // any finished job, failed ones too, tells the 최근 작업 list. A job queued, started, put back or
+  // cancelled tells only its 대기 중 group.
   ai.onJobChange((slug, db, _folder, jobId) => {
     if (!push) return
     const job = db.prepare('SELECT kind, status FROM jobs WHERE id = ?').get(jobId) as { kind: string; status: string } | undefined
     if (job?.status === 'done') push({ slug, topic: pushTopic(job.kind), kind: job.kind })
     if (job?.status === 'done' || job?.status === 'failed') push({ slug, topic: 'jobs', kind: job.kind })
+    else if (job) push({ slug, topic: 'waiting', kind: job.kind })
   })
   // The queue pausing, resuming or getting blocked tells the banner every league screen shows.
   ai.onQueueState((slug) => push?.({ slug, topic: 'jobs', kind: 'queue' }))
