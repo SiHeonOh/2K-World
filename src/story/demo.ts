@@ -23,6 +23,24 @@ export interface DemoFacts {
   userText?: string
   /** A chatter batch's poll topic (question and options), when its plan has one. */
   poll?: { question: string; options: string[] }
+  /** A chatter batch's analysis topic, when its plan has one: who writes it, its 말머리 and subject, and its stats pack. */
+  analysis?: { author: string; tag: string | null; title: string; lines: string[] }
+}
+
+/** A long analysis post built from its stats pack, as is: sections, a counterpoint and a summary, with no number of its own. */
+function analysisBody(a: NonNullable<DemoFacts['analysis']>): string {
+  return [
+    `■ ${a.title}, 기록부터 보자`,
+    ...a.lines,
+    '',
+    '■ 반론',
+    '표본이 아직 적다는 말도 맞다. 상대가 약했던 경기가 섞였을 수도 있음.',
+    '',
+    '■ 세 줄 요약',
+    `- ${a.title}`,
+    '- 숫자는 위에 다 있음',
+    '- 반박은 기록 들고 와라',
+  ].join('\n')
 }
 
 const REACTIONS = [
@@ -131,6 +149,18 @@ export function demoOutput(kind: StoryKind, input: StoryInput): StoryOutput {
           heat: 3,
           comments: poll.options.slice(0, 3).map((o, i) => ({ author: fan(), body: `${i + 1}번 ${o} ㄱㄱ` })),
           poll,
+        })
+      }
+      // The plan's analysis topic, after the poll: one long post from its pack.
+      if (facts.analysis) {
+        posts.splice(poll ? 1 : 0, 0, {
+          board: facts.boards[0] ?? input.board,
+          author: facts.analysis.author,
+          tag: facts.analysis.tag,
+          title: facts.analysis.title,
+          body: analysisBody(facts.analysis),
+          heat: 3,
+          comments: comments(6),
         })
       }
       const replies = facts.postIds.slice(0, 6).map((postId) => ({ postId, replyTo: null, comments: comments(1 + Math.floor(random() * 3)) }))

@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
 import { lastEventId, lastNewsEventId, setStoryValue } from '@data/community'
 import { openDb, type Db } from '@data/db'
-import { currentSeason, seedLeague } from '@data/league'
+import { currentSeason, loadConfig, seedLeague, updateConfig } from '@data/league'
 import { boxLines, getGame, listGames, playoffsView, recordScore, standings, startPlayoffs, startSeason } from '@data/season'
-import { chatterInput, gameThreadInput, readLeague, short } from '@story/context'
+import { chatterInput, gameThreadInput, readLeague, roundUpInput, short } from '@story/context'
+import { planTopics } from '@story/topics'
 import { readFacts, unknownNumbers, type Facts } from '@story/numbers'
 import { storyDemo, storyKinds } from '@story/jobs'
 import { roundWikiInput, WIKI_EDITS, wikiEditDemo, wikiEditKind } from '@story/wikiEdits'
@@ -267,6 +268,96 @@ describe('honest writing passes the number check', () => {
       }
     }
     expect(seen.size).toBeGreaterThan(10)
+    expect(out).toEqual([])
+  })
+
+  it.each(SEEDS)('the season’s numbers in game threads, a round-up and analysis posts (seed %i)', (seed) => {
+    // Six rounds, so players have a last five and a game before it.
+    const rnd = random(seed)
+    for (let round = 1; round <= 6; round++) {
+      for (const g of listGames(db, currentSeason(db).id).filter((x) => x.round === round && x.status === 'scheduled')) {
+        const box = boxScore(g.home, g.away, rnd)
+        recordScore(db, { gameId: g.id, homeScore: box.home, awayScore: box.away, lines: box.lines })
+      }
+    }
+    const { config } = loadConfig(db)
+    updateConfig(db, { ...config, community: { ...config.community, topicMix: { analysis: 5 } } })
+    const league = readLeague(db, dir)
+    /** What a writer makes of one line of the pack: its numbers, and the arithmetic on them. */
+    const quoted = (line: string): string[] => {
+      const out: string[] = [line.trim()]
+      const n = (x: string | undefined) => Number(x)
+      let m = /\[(\S+?)\] (\d+)경기 (\d+)승 (\d+)패\(승률 (\.\d{3}|1\.000)\)/.exec(line)
+      if (m) out.push(`${m[1]} ${m[3]}승 ${m[4]}패, 승률 ${m[5]}`, `${m[1]} 승률 ${pct(n(m[3]), n(m[3]) + n(m[4]), 0)}%`, `${m[1]}는 ${m[2]}경기에서 ${m[3]}번 이겼다`)
+      m = /경기당 득점 ([\d.]+)점, 실점 ([\d.]+)점, 득실 ([+-]?[\d.]+)점/.exec(line)
+      if (m) out.push(`경기당 ${m[1]}점 넣고 ${m[2]}점 내줌`, `득실 마진 ${m[3]}점`, `${m[1]}점 넣고 ${m[2]}점 주니까 ${Math.abs(n(m[1]) - n(m[2])).toFixed(1)}점 차`)
+      for (const s of line.matchAll(/(야투|3점슛|자유투) ([\d.]+)%\((\d+)\/(\d+)\)/g)) out.push(`${s[1]} 성공률 ${s[2]}%`, `${s[1]} ${s[3]}/${s[4]}`, `${s[1]} ${Math.round(n(s[2]))}%`)
+      m = /경기당 리바 ([\d.]+)/.exec(line)
+      if (m) out.push(`경기당 리바운드 ${m[1]}개`)
+      m = /최근 5경기 (\d)승 (\d)패/.exec(line)
+      if (m) out.push(`최근 5경기 ${m[1]}승 ${m[2]}패`)
+      for (const s of line.matchAll(/(\S+)전 (\d+):(\d+) ([승패])/g)) out.push(`${s[1]}전 ${s[2]}:${s[3]}, ${Math.abs(n(s[2]) - n(s[3]))}점 차 ${s[4] === '승' ? '승리' : '패배'}`)
+      m = /\[(\S+?)\((\S+)\)\] (\d+)경기 평균 ([\d.]+)점 ([\d.]+)리바 ([\d.]+)어시\(총 (\d+)점 (\d+)리바/.exec(line)
+      if (m) out.push(`${m[1]} ${m[3]}경기 평균 ${m[4]}점 ${m[5]}리바`, `${m[1]} 시즌 총 ${m[7]}점`, `${m[1]}는 경기당 ${m[4]}득점`, `리바운드 총 ${m[8]}개`)
+      m = /최근 5경기 평균 ([\d.]+)점.*?시즌 평균보다 ([\d.]+)점 (많음|적음)/.exec(line)
+      if (m) out.push(`최근 5경기 평균 ${m[1]}점, 시즌보다 ${m[2]}점 ${m[3] === '많음' ? '많다' : '적다'}`)
+      m = /최근 5경기 평균 ([\d.]+)점, 시즌 평균 ([\d.]+)점보다 ([\d.]+)점 (많음|적음)/.exec(line)
+      if (m) out.push(`최근 5경기 ${m[1]}점으로 시즌 평균 ${m[2]}점보다 ${m[3]}점 ${m[4] === '많음' ? '올랐다' : '떨어졌다'}`)
+      m = /시즌 최고 (\d+)점\((\S+)전\)/.exec(line)
+      if (m) out.push(`시즌 최고는 ${m[2]}전 ${m[1]}점`)
+      m = /팀 득점의 ([\d.]+)%/.exec(line)
+      if (m) out.push(`팀 득점의 ${m[1]}%를 책임짐`)
+      m = /오늘 (\d+)점 · 이 경기 전 (\d+)경기 평균 ([\d.]+)점.*?평균보다 ([\d.]+)점 (많음|적음)/.exec(line)
+      if (m) out.push(`오늘 ${m[1]}점, 평소 ${m[3]}점보다 ${m[4]}점 ${m[5] === '많음' ? '더 넣었다' : '덜 넣었다'}`, `${m[2]}경기 평균 ${m[3]}점이던 선수`)
+      m = /· 시즌 (\d+)경기 평균 ([\d.]+)점/.exec(line)
+      if (m) out.push(`시즌 ${m[1]}경기 평균은 ${m[2]}점`)
+      m = /^- (야투|3점슛|자유투) (\S+) ([\d.]+)%\((\d+)\/(\d+)\) 대 (\S+) ([\d.]+)%\((\d+)\/(\d+)\), ([\d.]+)%p 차/.exec(line)
+      if (m) out.push(`${m[1]} ${m[3]}% 대 ${m[7]}%, ${m[10]}%p 차이`, `${m[2]} ${m[1]} ${m[4]}/${m[5]}`)
+      m = /^(\d+)\. (\S+) (\d+)승 (\d+)패\((\.\d{3}|1\.000)\)(?: · ([\d.]+)경기 차)?/.exec(line.trim())
+      if (m) out.push(`${m[2]} ${m[3]}승 ${m[4]}패로 ${m[1]}위${m[6] ? `, 1위와 ${m[6]}경기 차` : ''}`)
+      m = /경계: (\d+)위 (\S+) .*? \/ (\d+)위 (\S+) .*?, ([\d.]+)경기 차/.exec(line)
+      if (m) out.push(`${m[2]}랑 ${m[4]} ${m[5]}경기 차`)
+      return out
+    }
+    const checked = (context: string, instructions: string, lines: string[]) => {
+      const facts = readFacts(context, instructions)
+      const sentences = lines.flatMap(quoted)
+      return { count: sentences.length, flagged: flagged(facts, sentences) }
+    }
+    const blockLines = (context: string, headings: RegExp) => {
+      const out: string[] = []
+      let inside = false
+      for (const l of context.split('\n')) {
+        if (/^#\s/.test(l)) inside = headings.test(l)
+        else if (inside && l.trim()) out.push(l)
+      }
+      return out
+    }
+    let count = 0
+    const out: string[] = []
+    for (const g of listGames(db, currentSeason(db).id).filter((x) => x.round === 6).slice(0, 2)) {
+      const input = gameThreadInput(league, g.id, lastNewsEventId(db))
+      const r = checked(input.context, input.instructions, blockLines(input.context, /^# (두 학교 시즌 기록|오늘 활약과 시즌 기록|승부를 가른 숫자)/))
+      count += r.count
+      out.push(...r.flagged)
+    }
+    const up = roundUpInput(league, currentSeason(db).id, 6)!
+    const r = checked(up.context, up.instructions, blockLines(up.context, /^# (순위 경쟁|상승세와 하락세|R6 활약|R6로 바뀐 것)/))
+    count += r.count
+    out.push(...r.flagged)
+    // Analysis packs, as the chatter plan shows them.
+    const subjects = new Set<string>()
+    for (let s = 1; s <= 8; s++) {
+      for (const study of planTopics(league, 8, s * 31 + seed).filter((x) => x.kind === 'analysis')) {
+        subjects.add(study.brief.slice(0, 20))
+        const plan = `# 이번에 쓸 글\n1. [분석 글 · 게시판 main] ${study.brief}\n   자료: ${study.facts.join(' / ')}\n${study.pack!.map((l) => `   ${l}`).join('\n')}`
+        const p = checked(plan, '', study.pack!)
+        count += p.count
+        out.push(...p.flagged)
+      }
+    }
+    expect(subjects.size).toBeGreaterThan(1)
+    expect(count).toBeGreaterThan(300)
     expect(out).toEqual([])
   })
 

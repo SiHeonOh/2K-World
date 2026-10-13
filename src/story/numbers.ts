@@ -16,7 +16,8 @@ import { flagOf, numberTokens, parseFlag, sameUnit, UNVERIFIED_TAG, type NumberT
  * of the text counts too.
  *
  * 0, 1 and 2 aren't checked (counts written as digits are common and
- * harmless), and neither is what numberTokens skips, or a number in a
+ * harmless), and neither is what numberTokens skips, a list number at a
+ * line's start (a long post's "3. 두 번째 기점"), or a number in a
  * clause that's a prediction or a condition ("40점 넣으면 인정", "16강은
  * 간다", "25.5점 찍겠네"); a past-tense claim always is, and so is a stat
  * ("시즌 평균 57점") next to a word that only looks ahead in time (내일).
@@ -224,6 +225,17 @@ function holds(sorted: readonly number[], [lo, hi]: [number, number]): boolean {
 
 const small = (t: NumberToken) => t.decimals === 0 && t.value <= 2
 const isShare = (t: NumberToken) => t.percent || t.unit === '%p'
+
+/**
+ * A list number at a line's start ("3. 두 번째 기점", "4) 대안", "**5. 마치며**"):
+ * it numbers a long post's section, not a stat. (In the facts it stays a
+ * number: a table's "3. 가람고 …" is where a writer's "3위" comes from.)
+ */
+function listNumber(text: string, t: NumberToken): boolean {
+  if (t.decimals > 0 || t.unit !== '') return false
+  const lineStart = text.lastIndexOf('\n', t.start - 1) + 1
+  return /^[\s*]*$/.test(text.slice(lineStart, t.start)) && /^[.)](?:\s|$)/.test(text.slice(t.end, t.end + 2))
+}
 
 /** Whether the facts hold a number (or work it out). A percentage only as a share; a decimal also as one (0.625, .750). */
 function inFacts(t: NumberToken, facts: Facts): boolean {
@@ -436,12 +448,13 @@ export function checkNumbers(text: string, facts: Facts): { unknown: string[]; u
     const ahead = span !== null && (!span.weak || !STAT_BEFORE.test(text.slice(Math.max(span.start, t.start - 16), t.start)))
     const fact = inFacts(t, facts)
     const shown = !fact && holds(facts.unverified, range(t))
-    return { t, sentence: e, skip: small(t) || ahead, fact, shown }
+    const list = listNumber(text, t)
+    return { t, sentence: e, skip: small(t) || ahead || list, list, fact, shown }
   })
   // What a sentence's own arithmetic may use: its known numbers (facts, or shown as unverified), the first few.
   const known = new Map<number, NumberToken[]>()
   for (const r of read) {
-    if (small(r.t) || !(r.fact || r.shown)) continue
+    if (small(r.t) || r.list || !(r.fact || r.shown)) continue
     const list = known.get(r.sentence) ?? []
     if (list.length < MAX_OWN) known.set(r.sentence, [...list, r.t])
   }

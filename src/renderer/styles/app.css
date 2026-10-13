@@ -1567,6 +1567,10 @@ input.stat.flagged {
   line-height: 1.7;
   font-size: 15px;
   min-height: 60px;
+  /* Long analysis posts: lines a reader can follow, Korean words kept whole, and no long run overflowing. */
+  max-width: 46em;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .cm-votes {
   display: flex;

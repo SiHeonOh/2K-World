@@ -99,10 +99,18 @@ export interface StoryInput {
   effort?: EffortLevel
   /** The -p instruction for this job. */
   instructions: string
+  /**
+   * How this job's posts are written (a round-up's column: its length and
+   * sections), chosen by code: part of the prompt after the kind's own
+   * instructions, but not facts for the number check.
+   */
+  guide?: string
   /** League facts, lore and the cast, piped in. */
   context: string
   /** Where posts go when the writer names no valid board. */
   board: string
+  /** chatter_batch: the long posts (장문) its plan asked for, counted against the day's (LONG_PER_DAY in topics.ts). */
+  long?: number
   gameId?: number | null
   eventId?: number | null
   /** reply_to_user: the post, and the comment of yours being answered (null: the post itself). */
@@ -145,10 +153,11 @@ export interface StoryJobHooks {
 const STYLE = `너는 한국 고교 농구 리그를 다루는 온라인 커뮤니티(에펨코리아 같은 분위기)의 글과 댓글을 대신 쓰는 작가다.
 
 규칙:
-- 모두 한국어로 쓴다. 팬은 커뮤니티 말투(반말 위주, ㅋㅋ, 초성체, 드립, 줄임말)로, 기자는 기사체로 쓴다.
+- 모두 한국어로 쓴다. 팬은 커뮤니티 말투(반말 위주, ㅋㅋ, 초성체, 드립, 줄임말, 맥락 설명 없이 별명과 약칭)로, 기자는 기사체로 쓴다.
+- 글 길이는 "이번에 쓸 글"에 적힌 대로: 대부분 한두 줄이고 제목이 곧 글이다. 장문은 드물지만 진짜 길게, 짧은 문단과 번호 소제목, **굵은** 결론 문장으로 쓴다. 마크다운 제목(#)과 표는 쓰지 않는다.
 - 사실(점수, 기록, 순위, 소속, 결과)은 받은 자료와 똑같이 쓴다. 자료에 없는 숫자나 사건을 지어내지 않는다. 팬이 틀리게 기억하는 버릇이 있으면 그 사람 댓글에서만 살짝 틀리고, 다른 팬이 바로잡아도 된다. "(확인 안 된 숫자)"가 붙은 숫자는 인용하거나 따질 수는 있지만 사실처럼 되풀이하지 않는다.
 - author에는 "쓸 수 있는 사람" 목록의 id(f012, r01 같은 것)만 쓴다. 각자의 성격, 응원 학교, 버릇, 매운맛(1 순함 ~ 5 독함)을 지킨다. 한 사람이 너무 많이 쓰지 않게 고르게 섞는다.
-- 매운맛(1 순함 ~ 5 막장)에 따라 욕설, 원색 비난, 키배, 조리돌림까지 실제 커뮤니티처럼 쓴다. 단, 어떤 단계에서도 패드립, 인종·성별·지역·장애 비하, 부상 조롱, 승부조작 드립, 고인 모독, 실존 인물 비방, 진짜 위협은 쓰지 않는다. 선수들은 고등학생이다: 성적인 내용은 절대 쓰지 않는다.
+- 매운맛(1 순함 ~ 5 막장)에 따라 욕설, 원색 비난, 키배, 조리돌림까지 실제 커뮤니티처럼 쓴다. 4~5인 사람은 욕과 원색적인 까기가 기본이고, 3은 가끔 섞는다. 단, 어떤 단계에서도 패드립, 실제 지역 비하(리그 안 학교·디비전끼리 라이벌 드립은 괜찮다), 인종·민족·성별·장애 비하, 부상 조롱, 승부조작·도박 드립("주작", "조작", 토토), 고인 모독, 실존 인물 비방, 진짜 위협, 한 학교를 글마다 몰아가는 조롱은 쓰지 않는다. 선수들은 고등학생이다: 성적인 내용은 절대 쓰지 않는다.
 - [공개]는 모두 아는 이야기다. [소문 — 확인 안 됨]은 "소문 OK"인 사람만 "카더라" 식으로 꺼낼 수 있고, 사실처럼 단정하지 않는다. 비밀은 받지 않으며 지어내지도 않는다.
 - "이미 나온 이야기"에 있는 제목과 같은 글을 또 쓰지 않는다.
 - 댓글끼리 대화가 되게 한다: 반박, 맞장구, 드립 받아치기. reply에는 같은 목록 안 앞 댓글의 번호를 쓴다.
@@ -159,7 +168,8 @@ const STYLE = `너는 한국 고교 농구 리그를 다루는 온라인 커뮤�
 
 const INSTRUCTIONS: Record<StoryKind, string> = {
   post_game_thread:
-    '자료의 "이 경기"에 대한 경기 후 스레드 1개를 쓴다(제목은 결과가 보이게, 본문은 짧은 요약과 한마디). 댓글 12~20개: 양 팀 팬, 중립 팬이 섞여 MVP, 승부처, 아쉬운 점, 다음 경기를 두고 떠든다. 경기가 화제가 될 만하면(접전, 이변, 30점 이상, 기록) 기자가 쓴 짧은 기사 1개를 더 쓴다(댓글 3~6개). replies는 빈 배열.',
+    '자료의 "이 경기"에 대한 경기 후 스레드 1개를 쓴다: 제목은 결과가 보이게(이긴 쪽 도발이나 진 쪽 멘붕 꼴로), 본문은 0~2줄(한마디나 "(움짤) …" 장면 한 줄). 댓글 12~20개: 양 팀 팬, 중립 팬이 섞여 MVP, 승부처, 아쉬운 점, 다음 경기를 두고 떠든다. 팬 댓글은 대부분 한 줄로 짧게 쓰고, 정정 체인, 복붙 밈, 콘 댓글을 섞는다.\n' +
+    '기자 기사 1개를 더 쓴다(말머리 리뷰나 현장, 본문 600~1500자, 4~7문단, 댓글 3~6개). 결과를 옮겨 적지 말고 왜 그렇게 됐는지 쓴다: 제목은 별명이나 인용으로 여는 훅. 리드 한 문장에 누가 무엇을 했고 왜 중요한지(연승, 순위, 첫 기록). "승부를 가른 숫자"로 승부처를 2~3문단(문단마다 숫자 1~3개). "오늘 활약과 시즌 기록"으로 선수의 오늘을 평소와 비교. 감독이나 선수의 말 한마디(태도와 각오만, 새 사실 없이). 진 팀의 문제 한 문단. "두 학교 시즌 기록"과 "이 경기로 바뀐 순위"로 순위 싸움에서 뜻하는 것과 전망(다음 경기는 자료에 있는 것만). 박스스코어가 없으면 점수와 두 학교 시즌 기록으로 쓰고, 더 짧아도 된다. 숫자는 자료에 적힌 그대로 쓴다. replies는 빈 배열.',
   event_thread:
     '자료의 "이번 소식"에 대해 쓴다: 기자의 기사나 공지 1개(말머리 오피셜 등, 댓글 3~8개)와, 팬들의 반응 스레드 1개(댓글 10~16개). 트레이드면 양쪽 팬의 반응과 손익 논쟁, 수상이면 축하와 반론. replies는 빈 배열.',
   reply_to_user:
@@ -167,7 +177,9 @@ const INSTRUCTIONS: Record<StoryKind, string> = {
   live_comments:
     '자료의 "이번 소식"은 진행 중인 드래프트에서 방금 나온 보호와 지명이다. "드래프트 라이브" 스레드에 replies로 댓글 8~16개를 단다(postId는 지시의 글 번호): 지명마다 데려온 학교와 빼앗긴 학교 팬의 반응(환호, 분노, 복수 지명 드립, 단장 까기), 다음 지명 예측. 앞 댓글들과 이어지게. posts는 빈 배열.',
   chatter_batch:
-    '경기와 경기 사이의 게시판 일상을 쓴다. 자료의 "이번에 쓸 글" 목록을 하나씩 새 글로 쓴다: 적힌 게시판(board)과 말머리(tag)를 따르고, 각 글의 "자료"만 사실로 쓴다. 경기 결과 얘기로 몰지 말 것. 목록이 곧 오늘 게시판의 분위기다(로어, 찌라시, 키배, 리그 까기, 드립, 일상, 질문, 투표…). 글마다 댓글을 달고, "지금 뜨는 글"에 새 댓글 묶음(replies)을 단다. 합쳐서 대략 요청한 개수만큼. 글마다 다른 사람이 쓰고, 같은 사람이 모든 글에 나오지 않게 한다.',
+    '경기와 경기 사이의 게시판 일상을 쓴다. 자료의 "이번에 쓸 글" 목록을 하나씩 새 글로 쓴다: 적힌 게시판(board)과 말머리(tag)를 따르고, 각 글의 "자료"만 사실로 쓴다. 경기 결과 얘기로 몰지 말 것. 목록이 곧 오늘 게시판의 분위기다(로어, 찌라시, 키배, 리그 까기, 드립, 일상, 질문, 투표…). 글마다 댓글을 달고, "지금 뜨는 글"에 새 댓글 묶음(replies)을 단다. 합쳐서 대략 요청한 개수만큼. 글마다 다른 사람이 쓰고, 같은 사람이 모든 글에 나오지 않게 한다. 글쓴이가 적힌 글은 그 사람이 쓴다.\n' +
+    '글마다 적힌 길이를 지킨다. 한줄: 본문 0~2줄(60자 안쪽), 제목이 곧 글이다. 비우거나 제목을 되풀이해도 되고, 짤 대신 "(움짤) …"이나 "[캡처] …" 한 줄로 장면을 적는다. 짧게: 1~4줄, 주장 하나에 숫자는 많아야 하나. 중간: 4~12줄(150~600자), 정리글이면 1), 2) 번호에 ~함/~임. 장문: 1500~3000자, 1~3문장짜리 짧은 문단 20개 이상, 번호 소제목("1. ○○"), 절마다 결론 한 문장은 **굵게**, 처음에 글의 목적이나 "주관 주의" 한 줄, "물론 ~긴 하다만 / 근데 문제는"으로 반론을 받고, 독자에게 묻는 말로 맺는다. 3줄요약은 쓰지 않는다. 썰은 이야기를 풀고, 뇌피셜은 근거를 늘어놓고, 비교글은 항목별로 나란히 놓는다. 분석 글은 장문으로, 적힌 뼈대(B 칼럼, C 선수 블록, D 프리뷰)를 따르고 그 글의 자료에 적힌 숫자로만 비교한다. 마크다운 제목(#)과 표는 쓰지 않는다.\n' +
+    '장문 글의 댓글은 6~12개: "분석추", "굿글추" 같은 칭찬 두세 개, "결과론임" 반박 하나, 길이를 놀리는 한 줄 하나, 숫자로 따지는 사람, 발끈하는 그 학교 팬, 그리고 방어하는 원글쓴이.',
 }
 
 const kindOf = (job: JobRow) => job.kind as StoryKind
@@ -344,7 +356,10 @@ export function storyKinds(db: Db, style: () => string | null = () => null, hook
     systemPrompt: () => style() ?? STYLE,
     // A live thread's opening post has its own instructions (one thread, no article).
     prompt: (input) =>
-      withRetryNote(kind === 'event_thread' && input.liveKey ? input.instructions : `${INSTRUCTIONS[kind]}\n\n${input.instructions}`.trim(), input.numberRetry),
+      withRetryNote(
+        kind === 'event_thread' && input.liveKey ? input.instructions : [INSTRUCTIONS[kind], input.guide ?? '', input.instructions].filter(Boolean).join('\n\n').trim(),
+        input.numberRetry,
+      ),
     stdin: (input) => input.context,
     timeoutMs: 6 * 60_000,
     stillWanted: (input, job) => stillWanted(db, input, job),

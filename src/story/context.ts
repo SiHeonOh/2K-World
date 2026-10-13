@@ -3,7 +3,7 @@ import { hash32, rng, shuffle } from '@core/random'
 import { type LeagueConfig, aiFor } from '@shared/config/schema'
 import type { EventPayloads, LeagueEvent } from '@shared/events'
 import { lastEventId, listPersonas, memoriesOf, personaCount, savePersonas, type PersonaRow } from '@data/community'
-import type { Db } from '@data/db'
+import { jsonField, type Db } from '@data/db'
 import { flagsFor, flagsOf } from '@data/flags'
 import { tagUnverified } from '@shared/numbers'
 import { playedMode, roundLabel } from '@shared/played'
@@ -15,12 +15,13 @@ import { roundComplete } from '@data/schedule'
 import { rosterHistory } from '@data/moves'
 import { linkLore, loadLoreFolder, loreBlock, type LeagueRefs, type LoreLinks } from '@lore/folder'
 import type { DemoFacts } from './demo'
-import { planTopics } from './topics'
+import { LONG_PER_DAY, planTopics, type PostLength } from './topics'
 import type { TopicKind } from '@shared/config/schema'
 import { ARCHETYPES, makeCast } from './personas'
 import type { StoryInput, StoryKind } from './jobs'
 import { leagueFeelings } from './feelings'
 import { CAST_HEADING } from './numbers'
+import { gameBlocks, readSeason, roundBlocks, seasonNote } from './statsPack'
 
 /**
  * Builds what each story job reads: league facts, the game or event, lore
@@ -301,10 +302,24 @@ export function gameThreadInput(league: League, gameId: number, eventId: number)
   const g = gameBlock(league, gameId)
   const teams = game ? [game.home, game.away] : []
   const cast = pickCast(league, { teams, fans: 18, reporters: 1, salt: `game:${gameId}:${eventId}` })
+  // The reporter's article explains the game: both schools' seasons, the night against them, where it was decided (statsPack.ts).
+  const season =
+    game && game.homeScore !== null && game.awayScore !== null
+      ? gameBlocks(readSeason(league, game.seasonId), { ...game, homeScore: game.homeScore, awayScore: game.awayScore }, boxLines(league.db, gameId), g.players)
+      : []
   return {
     ...aiFor(league.config, 'gameThread'),
     instructions: '',
-    context: join2(boardsBlock(league), leagueBlock(league), g.text, loreFor(league, teams, g.players), myTakesBlock(league, teams, g.players), castBlock(league, cast), coveredBlock(league)),
+    context: join2(
+      boardsBlock(league),
+      leagueBlock(league),
+      g.text,
+      ...season,
+      loreFor(league, teams, g.players),
+      myTakesBlock(league, teams, g.players),
+      castBlock(league, cast),
+      coveredBlock(league),
+    ),
     board: boardOf(league, 'games'),
     gameId,
     eventId,
@@ -593,7 +608,21 @@ export function liveCommentsInput(league: League, events: LeagueEvent[], postId:
 }
 
 /**
- * The round-up when a regular-season round is complete: every result, the round's best lines, the table.
+ * How a round-up is written (a session's, in 2K 일정대로): a reporter's column
+ * with sections, not a list of scores, and the fans' thread. Part of the
+ * prompt, not facts.
+ */
+export function roundUpGuide(label: string, played: boolean): string {
+  return [
+    `${label} 정리 칼럼: 기자 글 1개(말머리 ${played ? '일차 정리' : '라운드 정리'})는 결과를 나열하지 말고 리뷰 칼럼으로 쓴다. 본문 1500~3000자, 1~3문장짜리 짧은 문단, 번호 소제목("1. ○○"), 절마다 결론 한 문장은 **굵게**. 마크다운 제목(#)과 표는 쓰지 않는다.`,
+    `소제목 순서: ${label} 총평과 결과 / 순위 경쟁(컨퍼런스마다 위쪽, 플레이오프 직행과 플레이-인 경계에 걸린 학교) / 상승세와 하락세(연승·연패, 최근 5경기, 물오른 선수와 주춤한 선수) / ${label} 활약을 시즌 기록과 함께 / 바뀐 것과 다음에 볼 것. 맺음은 독자에게 묻는 말로.`,
+    '숫자는 자료의 "순위 경쟁", "상승세와 하락세", "활약", "바뀐 것"에 적힌 그대로 쓰고, 자료에 없는 계산은 하지 않는다. 팬 반응 스레드 1개는 본문을 짧게, 댓글 10~16개로 쓴다(칭찬, "결과론임" 반박, 길이 놀리기, 자기 학교 순위 걱정).',
+  ].join('\n')
+}
+
+/**
+ * The round-up when a regular-season round is complete: every result, the round's best lines against their
+ * seasons, the standings race, who's hot and cold, and what the round changed (statsPack.ts).
  * In 2K 일정대로 it's a session's (N일차): schools played different numbers of games in it, some none.
  */
 export function roundUpInput(league: League, seasonId: number, round: number): StoryInput | null {
@@ -607,6 +636,7 @@ export function roundUpInput(league: League, seasonId: number, round: number): S
   const view = standings(league.db)
   const leaders = view.overall.slice(0, 2).map((s) => s.teamId)
   const cast = pickCast(league, { teams: leaders, fans: 16, reporters: 2, salt: `round:${seasonId}:${round}` })
+  const season = readSeason(league, seasonId)
   // Who played how often in this session (a school can play twice, or rest).
   const perSchool = new Map<string, number>()
   for (const g of games) for (const t of [g.home, g.away]) perSchool.set(t, (perSchool.get(t) ?? 0) + 1)
@@ -618,17 +648,26 @@ export function roundUpInput(league: League, seasonId: number, round: number): S
     `# ${label} 결과`,
     ...results.map((r) => `- ${r}`),
     played ? `# ${label}에 뛴 학교 (나머지는 쉼)\n${[...perSchool].map(([t, n]) => `${short(league, t)} ${n}경기`).join(', ')}` : '',
-    best.length ? `# ${label} 활약\n${best.map((l) => `- ${playerName(league, l.playerId)} (${short(league, l.teamId)}) ${statLine(l.stats)}`).join('\n')}` : '',
+    best.length
+      ? `# ${label} 활약 (시즌 기록과 함께)\n${best
+          .map((l) => {
+            const note = seasonNote(season, l)
+            return `- ${playerName(league, l.playerId)} (${short(league, l.teamId)}) ${statLine(l.stats)}${note ? ` · ${note}` : ''}`
+          })
+          .join('\n')}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n')
   return {
     ...aiFor(league.config, 'article'),
     instructions: played ? `${label} 정리다.` : `R${round} 라운드 정리다.`,
+    guide: roundUpGuide(label, played),
     context: join2(
       boardsBlock(league),
       leagueBlock(league),
       news,
+      ...roundBlocks(season, label, new Set(games.map((g) => g.id))),
       loreFor(league, leaders, best.map((l) => l.playerId)),
       myTakesBlock(league, leaders, best.map((l) => l.playerId)),
       castBlock(league, cast),
@@ -725,7 +764,8 @@ export function replyInput(league: League, postId: number, commentId: number | n
   const thread = [
     `# 글 ${postId}${post?.kind === 'live' ? ' (라이브 경기 스레드)' : ''}`,
     `제목: ${postTag(postId, said(post?.title ?? '', 120))}`,
-    post?.body ? `본문: ${postTag(postId, said(post.body, 1500))}` : '',
+    // Whole, up to an analysis post's length: repliers argue with what it says.
+    post?.body ? `본문: ${postTag(postId, said(post.body, 3000))}` : '',
     poll ? `투표: ${said(poll.question, 80)} 보기: ${poll.options.map((o, i) => `${i + 1}번 ${said(o.text, 40)}`).join(' / ')}` : '',
     recent.length
       ? `# 최근 댓글 (오래된 순)\n${[...recent]
@@ -761,18 +801,30 @@ export function chatterInput(league: League): StoryInput {
   const seed = hash32(`chatter:${lastEventId(league.db)}:${Date.now()}`)
   const random = rng(seed)
   const c = league.config.community
-  // About one new post per four items; the rest are their comments and replies to hot threads.
-  const seeds = planTopics(league, Math.max(4, Math.min(10, Math.round(c.chatterBatch / 4))), seed)
+  // About one new post per four items; the rest are their comments and replies to hot threads. Long posts stop at the day's cap.
+  const seeds = planTopics(league, Math.max(4, Math.min(10, Math.round(c.chatterBatch / 4))), seed, LONG_PER_DAY - longToday(league.db))
   const teams = [...new Set(seeds.flatMap((s) => s.teams).filter(Boolean))]
   const players = [...new Set(seeds.flatMap((s) => s.players))]
   const hot = hotPosts(league, 8)
   const hotTitle = unverified(league.db, 'post', hot.map((h) => h.id))
   const cast = pickCast(league, { teams, fans: 30, reporters: 1, salt: `chatter:${random()}` })
+  const writers = new Map(seeds.filter((s) => s.kind === 'analysis').map((s) => [s, analysisWriter(league, cast, random)] as const))
   const plan = [
-    `# 이번에 쓸 글 (하나에 새 글 하나, 적힌 게시판과 말머리로)`,
+    `# 이번에 쓸 글 (하나에 새 글 하나, 적힌 게시판과 말머리, 길이로)`,
     ...seeds.map((s, i) => {
-      const head = `${i + 1}. [${TOPIC_LABEL[s.kind]} · 게시판 ${boardOf(league, s.board)}${s.tag ? ` · 말머리 ${s.tag}` : ''}] ${s.brief}`
-      return s.facts.length ? `${head}\n   자료: ${s.facts.join(' / ')}` : head
+      const writer = writers.get(s)
+      // A reporter's analysis carries [분석]; a fan picks his own 말머리.
+      const tag = writer?.kind === 'fan' ? undefined : s.tag
+      const parts = [
+        TOPIC_LABEL[s.kind],
+        `게시판 ${boardOf(league, s.board)}`,
+        tag ? `말머리 ${tag}` : '',
+        `길이 ${LENGTH_LABEL[s.length]}${s.form ? `(${s.form})` : ''}`,
+        writer ? `글쓴이 ${writer.id}` : '',
+      ]
+      const head = `${i + 1}. [${parts.filter(Boolean).join(' · ')}] ${s.brief}`
+      // An analysis topic's stats pack, a line each (so numbers that belong together stay together for the number check).
+      return [head, s.facts.length ? `   자료: ${s.facts.join(' / ')}` : '', ...(s.pack ?? []).map((l) => `   ${l}`)].filter(Boolean).join('\n')
     }),
     hot.length ? `# 지금 뜨는 글 (replies의 postId로 쓸 수 있음)\n${hot.map((h) => `[${h.id}] ${hotTitle(h.id, said(h.title, 100))} (댓글 ${h.comments})`).join('\n')}` : '',
   ]
@@ -785,13 +837,20 @@ export function chatterInput(league: League): StoryInput {
     .map((w) => (w ? loreBlock(w, w.settings.id, 'rumor') : ''))
     .filter(Boolean)
     .join('\n\n')
-  // The demo writer turns the plan's poll topic into a post with a poll.
+  // The demo writer turns the plan's poll topic into a post with a poll, and its analysis topic into a long post from its pack.
   const poll = seeds.find((s) => s.poll)?.poll
+  const study = seeds.find((s) => s.kind === 'analysis')
+  const studyWriter = study ? writers.get(study) : undefined
+  const analysis =
+    study && studyWriter
+      ? { author: studyWriter.id, tag: studyWriter.kind === 'reporter' ? (study.tag ?? null) : null, title: (study.facts[0] ?? '').replace(/^주제: /, ''), lines: study.pack ?? [] }
+      : null
   return {
     ...aiFor(league.config, 'chatter'),
-    instructions: `위 "이번에 쓸 글" ${seeds.length}개를 하나씩 새 글로 쓰고(글마다 댓글 3~8개), "지금 뜨는 글"에 댓글 묶음 3~6개를 단다. 모두 합쳐 ${c.chatterBatch}개 안팎.`,
+    instructions: `위 "이번에 쓸 글" ${seeds.length}개를 하나씩 새 글로 쓰고(글마다 댓글 3~8개${seeds.some((s) => s.length === 'long') ? ', 장문 글은 6~12개' : ''}), "지금 뜨는 글"에 댓글 묶음 3~6개를 단다. 모두 합쳐 ${c.chatterBatch}개 안팎.`,
     context: join2(boardsBlock(league), leagueBlock(league), plan, loreFor(league, teams, players), worldLore, myTakesBlock(league, teams, players), castBlock(league, cast), coveredBlock(league)),
     board: boardOf(league, 'free'),
+    long: seeds.filter((s) => s.length === 'long').length,
     asOfEvent: lastEventId(league.db),
     spreadMs: 6 * 60_000,
     demo: demoFacts(league, cast, {
@@ -800,8 +859,53 @@ export function chatterInput(league: League): StoryInput {
       names: players.map((p) => playerName(league, p)),
       postIds: hot.map((h) => h.id),
       ...(poll ? { poll } : {}),
+      ...(analysis ? { analysis } : {}),
     }),
   }
+}
+
+/** Fans who write analysis posts: 분석러 and 통계충. */
+const ANALYSTS = ['analyst', 'stats']
+
+/**
+ * Who writes an analysis post: the cast's reporter or one of its analyst
+ * fans, about half each. With no analyst in the cast, one joins it (or the
+ * reporter writes).
+ */
+function analysisWriter(league: League, cast: PersonaRow[], random: () => number): PersonaRow | null {
+  const reporters = cast.filter((p) => p.kind === 'reporter')
+  let analysts = cast.filter((p) => p.kind === 'fan' && ANALYSTS.includes(p.archetype))
+  const wantFan = reporters.length === 0 || random() < 0.5
+  if (wantFan && analysts.length === 0) {
+    const pool = listPersonas(league.db).filter((p) => p.kind === 'fan' && ANALYSTS.includes(p.archetype))
+    const extra = pool[Math.floor(random() * pool.length)]
+    if (extra) {
+      cast.push(extra)
+      analysts = [extra]
+    }
+  }
+  const from = wantFan && analysts.length > 0 ? analysts : reporters
+  return from[Math.floor(random() * from.length)] ?? null
+}
+
+/** How long each planned post should be, as the plan names it (the chatter instructions say what each means). */
+const LENGTH_LABEL: Record<PostLength, string> = { line: '한줄', short: '짧게', medium: '중간', long: '장문' }
+
+/**
+ * Long posts the chatter has planned today (analysis included): the plan
+ * stops at LONG_PER_DAY. A retry plans nothing new, and a cancelled or
+ * failed job wrote nothing.
+ */
+function longToday(db: Db): number {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(${jsonField('input', '$.long')}), 0) AS n FROM jobs
+       WHERE kind = 'chatter_batch' AND status NOT IN ('cancelled', 'failed') AND created_at >= ? AND ${jsonField('input', '$.retryOf')} IS NULL`,
+    )
+    .get(start.toISOString()) as { n: number }
+  return row.n
 }
 
 /** How each topic is named to the writers. */
@@ -821,6 +925,7 @@ const TOPIC_LABEL: Record<TopicKind, string> = {
   school_pride: '학교 부심',
   poll: '투표',
   game_talk: '지난 경기',
+  analysis: '분석 글',
 }
 
 export type { StoryKind }

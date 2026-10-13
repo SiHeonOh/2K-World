@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router'
 import type { AuthorView, CommentView, PollView, PostSummary, PostView, RefreshResult } from '@shared/community'
 import { cleanOptions, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from '@shared/polls'
 import { call } from '../../api'
-import { ErrorBox, Loading, Marked } from '../../components/ui'
+import { Bolded, ErrorBox, Loading, Marked } from '../../components/ui'
 import { useLoad, usePush } from '../../hooks'
 import { t } from '../../i18n'
 import { useLeague } from './LeagueLayout'
@@ -467,7 +467,7 @@ function PostPage({
         </div>
       </div>
       <div className="cm-body">
-        <Marked text={post.body} numbers={post.flags} />
+        <Bolded text={post.body} numbers={post.flags} />
       </div>
       {post.poll ? <PollBox poll={post.poll} onVoted={() => setLocal((x) => x + 1)} onOpen={onOpen} /> : null}
       {post.resultsOf !== null ? (

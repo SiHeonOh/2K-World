@@ -393,6 +393,7 @@ export const TOPIC_KINDS = [
   'school_pride',
   'poll',
   'game_talk',
+  'analysis',
 ] as const
 export type TopicKind = (typeof TOPIC_KINDS)[number]
 export const DEFAULT_TOPIC_MIX: Record<TopicKind, number> = {
@@ -411,6 +412,8 @@ export const DEFAULT_TOPIC_MIX: Record<TopicKind, number> = {
   school_pride: 2,
   poll: 1,
   game_talk: 1,
+  // Long posts cost more to write: kept modest.
+  analysis: 2,
 }
 
 export const communitySchema = z

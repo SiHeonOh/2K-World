@@ -306,6 +306,29 @@ export function Marked({ text, numbers }: { text: string; numbers: readonly stri
   )
 }
 
+/**
+ * A post's body: **굵게** within a line is shown bold (long posts mark each
+ * section's conclusion so), the rest as Marked. Asterisks that don't pair up
+ * on one line stay as written.
+ */
+export function Bolded({ text, numbers }: { text: string; numbers: readonly string[] | undefined }) {
+  const parts = text.split(/\*\*([^*\n]+?)\*\*/g)
+  if (parts.length === 1) return <Marked text={text} numbers={numbers} />
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <strong key={i}>
+            <Marked text={part} numbers={numbers} />
+          </strong>
+        ) : (
+          <Marked key={i} text={part} numbers={numbers} />
+        ),
+      )}
+    </>
+  )
+}
+
 export function IssueList({ items }: { items: { level: 'error' | 'warning' | 'info'; text: string; action?: ReactNode }[] }) {
   if (items.length === 0) return null
   return (

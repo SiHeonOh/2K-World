@@ -6,15 +6,32 @@ import { currentSeason, listPlayers, listTeams } from '@data/league'
 import { listGames, seasonBoxLines, standings } from '@data/season'
 import { listAwards } from '@data/moves'
 import type { League } from './context'
+import {
+  bigSwing,
+  closeRaces,
+  headToHead,
+  playerForms,
+  playerSeason,
+  readSeason,
+  standingsRace,
+  teamForms,
+  teamProfile,
+  topScorers,
+  type Season,
+} from './statsPack'
 
 /**
  * What the forum talks about between games. A real board is mostly not game
  * recaps: it's lore and nicknames, 찌라시, rival-school wars, roasting the
  * league, tier lists, stat nerds, bold predictions, shitposts, off-topic
- * school life, newbie questions and polls. Each chatter batch gets a planned
- * mix of these, every one with real facts from the league, so the writers
- * have something true to riff on and every refresh feels different.
+ * school life, newbie questions and polls, now and then a long analysis
+ * post. Each chatter batch gets a planned mix of these, every one with real
+ * facts from the league, so the writers have something true to riff on and
+ * every refresh feels different; and a planned mix of lengths, mostly short.
  */
+
+/** How long a post should be: a one-liner (the title is the post), a few lines, a short post, or a long one (장문). */
+export type PostLength = 'line' | 'short' | 'medium' | 'long'
 
 export interface TopicSeed {
   kind: TopicKind
@@ -24,15 +41,22 @@ export interface TopicSeed {
   brief: string
   /** Facts to build on (the only numbers and events the post may state as true). */
   facts: string[]
+  /** An analysis topic's stats pack (statsPack.ts), one fact per line: the numbers it may use, as written. */
+  pack?: string[]
   teams: string[]
   players: string[]
   /** Tag (말머리) the post should carry, if any. */
   tag?: string
   /** A poll topic's question and options: the post carries a real poll that fans vote on. */
   poll?: { question: string; options: string[] }
+  length: PostLength
+  /** What a long post reads as (분석글, 썰, 뇌피셜, 비교글). */
+  form?: string
 }
 
-type Maker = (ctx: Ctx) => TopicSeed | null
+/** A topic before the plan gives it a length. */
+type Draft = Omit<TopicSeed, 'length' | 'form'>
+type Maker = (ctx: Ctx) => Draft | null
 
 interface Ctx {
   league: League
@@ -44,6 +68,61 @@ interface Ctx {
   slot: (slotId: string | null) => string
   /** Players already used in this batch, so one name doesn't carry every post. */
   used: Set<string>
+  /** The season's numbers, read the first time a topic needs them. */
+  season: () => Season
+}
+
+/**
+ * Of every ten chatter posts, how many get each length, as on FMKorea's
+ * sports boards (a day without games, and roughly a game day too): four
+ * one-liners whose title is the post, three short, two medium, one long.
+ * An analysis post is always long and counts toward its share.
+ */
+export const LENGTH_MIX: Record<PostLength, number> = { line: 4, short: 3, medium: 2, long: 1 }
+
+/** Long posts a day at most, analysis included: a board sees one or two, and they cost the most to write. */
+export const LONG_PER_DAY = 2
+
+/** What a long post of each kind reads as; kinds not listed are never long. */
+const LONG_FORM: Partial<Record<TopicKind, string>> = {
+  analysis: '분석글',
+  stats: '분석글',
+  game_talk: '분석글',
+  rankings: '비교글',
+  rivalry: '비교글',
+  school_pride: '비교글',
+  lore_story: '썰',
+  world_topic: '썰',
+  off_topic: '썰',
+  rumor: '뇌피셜',
+  prediction: '뇌피셜',
+  drama: '뇌피셜',
+}
+
+/** Kinds that stay short: a poll's body is a jab, a newbie asks in a line or two. */
+const SHORT_ONLY: ReadonlySet<TopicKind> = new Set(['poll', 'newbie'])
+
+/** Kinds that can be a one-liner (a title, a "(움짤) …" line): taunts, jokes, a scene, a call. The rest need a body. */
+const LINE_OK: ReadonlySet<TopicKind> = new Set(['meme', 'off_topic', 'school_pride', 'game_talk', 'rivalry', 'league_roast', 'drama', 'prediction', 'poll', 'newbie'])
+
+/**
+ * Gives each topic its length by LENGTH_MIX: analysis long, then other
+ * long-capable kinds while the long share and `longLeft` (today's) allow,
+ * then medium, then one-liners, the rest short.
+ */
+function withLengths(drafts: Draft[], random: () => number, longLeft: number): TopicSeed[] {
+  const quota = (length: PostLength) => Math.round((drafts.length * LENGTH_MIX[length]) / 10)
+  const lengths = new Map<Draft, PostLength>()
+  for (const d of drafts) if (d.kind === 'analysis') lengths.set(d, 'long')
+  const open = (ok: (d: Draft) => boolean) => shuffle(drafts.filter((d) => !lengths.has(d) && ok(d)), random)
+  const long = Math.max(0, Math.min(quota('long'), longLeft) - lengths.size)
+  for (const d of open((x) => LONG_FORM[x.kind] !== undefined).slice(0, long)) lengths.set(d, 'long')
+  for (const d of open((x) => !SHORT_ONLY.has(x.kind)).slice(0, quota('medium'))) lengths.set(d, 'medium')
+  for (const d of open((x) => LINE_OK.has(x.kind)).slice(0, quota('line'))) lengths.set(d, 'line')
+  return drafts.map((d) => {
+    const length = lengths.get(d) ?? 'short'
+    return length === 'long' ? { ...d, length, form: LONG_FORM[d.kind]! } : { ...d, length }
+  })
 }
 
 /** Everyday things high-school basketball fans talk about when they aren't talking basketball. */
@@ -89,6 +168,179 @@ function playerFacts(c: Ctx, id: string): string[] {
   if (p.notes) facts.push(`메모: ${p.notes.slice(0, 200)}`)
   return facts
 }
+
+/** Rival schools named in school lore (`rivals`). */
+function rivalPairs(c: Ctx): [string, string][] {
+  const pairs: [string, string][] = []
+  for (const [id, e] of c.league.lore.team) {
+    if (e.kind !== 'team') continue
+    for (const r of e.settings.rivals) {
+      const other = [...c.league.teams.values()].find((t) => t.shortName === r)
+      if (other) pairs.push([id, other.id])
+    }
+  }
+  return pairs
+}
+
+/**
+ * What an analysis post digs into: its subject in a few words, the angle,
+ * the style guide's skeleton for it (B a column, C player blocks, D a
+ * preview), who's in it and their numbers.
+ */
+interface Subject {
+  topic: string
+  brief: string
+  skeleton: 'B' | 'C' | 'D'
+  teams: string[]
+  players: string[]
+  pack: string[]
+}
+
+/** Schools a few games into the season: a record worth reading. */
+const settled = (s: Season, games = 4) => s.games.length * 2 >= s.refs.length * games
+
+/**
+ * Analysis subjects, each null when the season gives it nothing to stand on.
+ * They don't mark players as used: only the one picked does.
+ */
+const SUBJECTS: ((c: Ctx, s: Season) => Subject | null)[] = [
+  // A school on a run of three or more.
+  (c, s) => {
+    const f = c.pick(teamForms(s).filter((x) => Math.abs(x.streak) >= 3))
+    if (!f) return null
+    const team = c.short(f.teamId)
+    const n = Math.abs(f.streak)
+    const stars = topScorers(s, 2, f.teamId).filter((id) => !c.used.has(id))
+    return {
+      topic: `${team} ${n}${f.streak > 0 ? '연승' : '연패'}`,
+      brief:
+        f.streak > 0
+          ? `${team}의 ${n}연승, 뭐가 달라졌나. 최근 5경기와 시즌 전체(득실, 슈팅, 홈·원정, 접전)를 비교해 이유를 짚고, "상대가 약했을 뿐"이라는 반론도 다룬다.`
+          : `${team} ${n}연패, 어디서 무너졌나. 최근 5경기와 시즌 전체를 비교해 원인을 짚고, 반등할 근거가 있는지도 따진다.`,
+      skeleton: 'B',
+      teams: [f.teamId],
+      players: stars,
+      pack: [...teamProfile(s, f.teamId), ...stars.flatMap((id) => playerSeason(s, id))],
+    }
+  },
+  // A record the roster or the points don't explain: above or below its OVR, or winning on a losing margin (and the other way).
+  (c, s) => {
+    if (!settled(s)) return null
+    const strength = new Map(
+      s.refs.map((t) => {
+        const top = c.roster.filter((p) => p.teamId === t.id).map((p) => c.ovr(p.id)).filter((v): v is number => v !== null).sort((a, b) => b - a).slice(0, 5)
+        return [t.id, top.length ? Number((top.reduce((x, y) => x + y, 0) / top.length).toFixed(1)) : null] as const
+      }),
+    )
+    const byStrength = [...strength].filter(([, v]) => v !== null).sort((a, b) => b[1]! - a[1]! || a[0].localeCompare(b[0])).map(([id]) => id)
+    const options = s.table.overall.flatMap((x, i) => {
+      const team = c.short(x.teamId)
+      const margin = x.pointsFor - x.pointsAgainst
+      const lucky = (x.wins > x.losses && margin < 0) || (x.wins < x.losses && margin > 0)
+      const r = byStrength.indexOf(x.teamId)
+      const gap = byStrength.length === s.refs.length && r >= 0 ? r - i : 0
+      const extra = gap !== 0 ? [`[${team}] 상위 5명 평균 OVR ${strength.get(x.teamId)}(리그 ${r + 1}위) · 성적 전체 ${i + 1}위`] : []
+      const out: { teamId: string; topic: string; brief: string; extra: string[] }[] = []
+      if (Math.abs(gap) >= 3) {
+        out.push({
+          teamId: x.teamId,
+          topic: `${team} 전력 대비 ${gap > 0 ? '돌풍' : '부진'}`,
+          brief: gap > 0 ? `${team}, OVR로는 아래쪽인데 성적은 위다: 진짜인지 거품인지 기록으로 따진다.` : `${team}, OVR로는 위인데 성적이 안 나온다: 어디가 문제인지 기록으로 따진다.`,
+          extra,
+        })
+      }
+      if (lucky) {
+        out.push({
+          teamId: x.teamId,
+          topic: `${team} 성적과 득실이 따로 논다`,
+          brief: `${team}, ${x.wins > x.losses ? '이기는 경기가 많은데 득실은 마이너스' : '지는 경기가 많은데 득실은 플러스'}다: 접전 성적과 경기 내용을 보고 운인지 실력인지 따진다.`,
+          extra,
+        })
+      }
+      return out
+    })
+    const o = c.pick(options)
+    if (!o) return null
+    const stars = topScorers(s, 1, o.teamId).filter((id) => !c.used.has(id))
+    return {
+      topic: o.topic,
+      brief: o.brief,
+      skeleton: 'B',
+      teams: [o.teamId],
+      players: stars,
+      pack: [...o.extra, ...teamProfile(s, o.teamId), ...stars.flatMap((id) => playerSeason(s, id))],
+    }
+  },
+  // A player whose last five are far from his season.
+  (c, s) => {
+    const f = c.pick(playerForms(s).filter((x) => bigSwing(x) && !c.used.has(x.playerId)))
+    if (!f) return null
+    const name = s.player(f.playerId)
+    const up = f.diff > 0
+    return {
+      topic: `${name} 최근 5경기 ${up ? '상승세' : '부진'}`,
+      brief: up
+        ? `${name}의 최근 5경기, 진짜 성장인가 반짝인가. 시즌 평균과 최근 5경기를 나란히 놓고 슈팅과 팀 내 비중까지 따진다.`
+        : `${name} 최근 5경기 부진, 슬럼프인가 일시적인가. 시즌 평균과 최근 5경기를 비교하고 팀 성적과도 엮는다.`,
+      skeleton: 'B',
+      teams: [f.teamId],
+      players: [f.playerId],
+      pack: [...playerSeason(s, f.playerId), ...teamProfile(s, f.teamId)],
+    }
+  },
+  // A meeting that's next on the schedule, or two rival schools from lore.
+  (c, s) => {
+    const next = listGames(c.league.db, currentSeason(c.league.db).id)
+      .filter((g) => g.status === 'scheduled' && g.stage === 'regular')
+      .slice(0, 6)
+    const g = c.pick(next)
+    const pair = g ? ([g.away, g.home] as const) : c.pick(rivalPairs(c))
+    if (!pair) return null
+    const [a, b] = pair
+    const stars = [...topScorers(s, 1, a), ...topScorers(s, 1, b)].filter((id) => !c.used.has(id))
+    return {
+      topic: g ? `다음 맞대결 ${c.short(a)} @ ${c.short(b)} 프리뷰` : `${c.short(a)} vs ${c.short(b)} 라이벌 비교`,
+      brief: `${g ? '다음 맞대결 프리뷰' : '라이벌 두 학교 비교'}. 두 학교의 시즌 기록, 맞대결, 에이스를 나란히 놓고 어디서 갈릴지 짚는다. 예상은 예상이라고 밝히고, 일정은 자료에 있는 것만.`,
+      skeleton: 'D',
+      teams: [a, b],
+      players: stars,
+      pack: [...teamProfile(s, a), ...teamProfile(s, b), headToHead(s, a, b), ...stars.flatMap((id) => playerSeason(s, id))],
+    }
+  },
+  // A close call in the standings: the top two, or either side of a playoff line.
+  (c, s) => {
+    if (!settled(s, 3)) return null
+    const r = c.pick(closeRaces(s))
+    if (!r) return null
+    const [a, b] = r.teams
+    return {
+      topic: `${r.group} ${r.line} 경쟁`,
+      brief: `${r.group} ${r.line} 다툼 분석: ${c.short(a)}, ${c.short(b)} 두 학교의 성적, 최근 흐름, 득실, 맞대결을 비교해 누가 유리한지 따진다. 남은 일정은 자료에 있는 것만.`,
+      skeleton: 'D',
+      teams: [a, b],
+      players: [],
+      pack: [...standingsRace(s, r.groupId), ...teamProfile(s, a), ...teamProfile(s, b), headToHead(s, a, b)],
+    }
+  },
+  // Two of the league's best scorers, side by side (from different schools when there's a choice).
+  (c, s) => {
+    const top = topScorers(s, 6).filter((id) => !c.used.has(id))
+    const a = c.pick(top.slice(0, 4))
+    if (!a) return null
+    const teamOf = (id: string) => s.totals.get(id)?.teamId ?? ''
+    const rest = top.filter((id) => id !== a)
+    const b = rest.find((id) => teamOf(id) !== teamOf(a)) ?? rest[0]
+    if (!b) return null
+    return {
+      topic: `${s.player(a)} vs ${s.player(b)}`,
+      brief: `${s.player(a)} vs ${s.player(b)}, 누가 더 나은 선수인가. 득점만이 아니라 슈팅 효율, 최근 흐름, 팀 내 비중, 팀 성적까지 비교하고, 반대쪽 주장도 하나 세운다.`,
+      skeleton: 'C',
+      teams: [...new Set([teamOf(a), teamOf(b)])],
+      players: [a, b],
+      pack: [...playerSeason(s, a), ...playerSeason(s, b), teamProfile(s, teamOf(a))[0]!, teamProfile(s, teamOf(b))[0]!],
+    }
+  },
+]
 
 const MAKERS: Record<TopicKind, Maker> = {
   lore_story: (c) => {
@@ -142,14 +394,7 @@ const MAKERS: Record<TopicKind, Maker> = {
 
   rivalry: (c) => {
     // Rivals from school lore first; otherwise two schools from one division with close records.
-    const pairs: [string, string][] = []
-    for (const [id, e] of c.league.lore.team) {
-      if (e.kind !== 'team') continue
-      for (const r of e.settings.rivals) {
-        const other = [...c.league.teams.values()].find((t) => t.shortName === r)
-        if (other) pairs.push([id, other.id])
-      }
-    }
+    const pairs = rivalPairs(c)
     const table = standings(c.league.db)
     if (pairs.length === 0) {
       const rows = table.overall
@@ -404,18 +649,41 @@ const MAKERS: Record<TopicKind, Maker> = {
       players: [],
     }
   },
+
+  analysis: (c) => {
+    const s = c.season()
+    if (s.games.length === 0) return null
+    const subject = c.pick(SUBJECTS.map((f) => f(c, s)).filter((x): x is Subject => x !== null))
+    if (!subject) return null
+    for (const p of subject.players) c.used.add(p)
+    return {
+      kind: 'analysis',
+      board: 'main',
+      tag: '분석',
+      brief: `장문 분석 글(뼈대 ${subject.skeleton}): ${subject.brief}`,
+      facts: [`주제: ${subject.topic}`],
+      pack: subject.pack,
+      teams: subject.teams,
+      players: subject.players,
+    }
+  },
 }
 
 /**
  * Picks `count` topics by the league's mix (weights 0–5; 0 = never), each
- * kind at most twice, game talk at most once, and fills each with facts. A
- * kind with nothing to work with (no lore yet, no box scores) is skipped.
+ * kind at most twice, game talk and analysis at most once, and fills each
+ * with facts. A kind with nothing to work with (no lore yet, no box scores)
+ * is skipped. Then each gets its length (LENGTH_MIX). `longLeft` is how many
+ * long posts the day still allows (LONG_PER_DAY): with none left, no
+ * analysis topic and no 장문.
  */
-export function planTopics(league: League, count: number, seed: number): TopicSeed[] {
+export function planTopics(league: League, count: number, seed: number, longLeft = LONG_PER_DAY): TopicSeed[] {
   const random = rng(seed)
   const roster = listPlayers(league.db)
   const overallId = league.config.ratings.overallColumnId
+  let season: Season | null = null
   const ctx: Ctx = {
+    season: () => (season ??= readSeason(league)),
     league,
     random,
     pick: (list) => (list.length ? list[Math.floor(random() * list.length)] : undefined),
@@ -429,12 +697,15 @@ export function planTopics(league: League, count: number, seed: number): TopicSe
     used: new Set(),
   }
   const mix = { ...DEFAULT_TOPIC_MIX, ...league.config.community.topicMix }
+  // An analysis post is always long.
+  if (longLeft <= 0) mix.analysis = 0
   const taken = new Map<TopicKind, number>()
-  const out: TopicSeed[] = []
+  const out: Draft[] = []
   for (let tries = 0; out.length < count && tries < count * 6; tries++) {
-    // Every kind once before any comes twice, so each batch is as varied as it can be.
+    // Every kind once before any comes twice, so each batch is as varied as it can be. An analysis post is long: once a batch.
+    const most = (k: TopicKind) => (k === 'game_talk' || k === 'analysis' ? 1 : 2)
     const fresh = TOPIC_KINDS.filter((k) => (mix[k] ?? 0) > 0 && !taken.has(k))
-    const open = fresh.length > 0 ? fresh : TOPIC_KINDS.filter((k) => (mix[k] ?? 0) > 0 && (taken.get(k) ?? 0) < (k === 'game_talk' ? 1 : 2))
+    const open = fresh.length > 0 ? fresh : TOPIC_KINDS.filter((k) => (mix[k] ?? 0) > 0 && (taken.get(k) ?? 0) < most(k))
     const total = open.reduce((s, k) => s + mix[k]!, 0)
     if (total === 0) break
     let r = random() * total
@@ -443,5 +714,5 @@ export function planTopics(league: League, count: number, seed: number): TopicSe
     const s = MAKERS[kind](ctx)
     if (s) out.push(s)
   }
-  return out
+  return withLengths(out, random, longLeft)
 }

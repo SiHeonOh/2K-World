@@ -14,6 +14,7 @@ import { castBlock, join2, loreFor, pickCast, playerName, said, short, statLine,
 import { seedWiki, wikiTitles } from './wiki'
 import type { WikiOccasion } from './wikiOccasions'
 import { numberGate, NumbersRedo, readFacts, withRetryNote } from './numbers'
+import { averages, streakText } from './statsPack'
 import { currentSeason, listPlayers, listTeams } from '@data/league'
 
 /**
@@ -211,24 +212,6 @@ export const quoteBlock = (text: string, max = 1500) =>
     .split('\n')
     .map((l) => `│ ${l}`)
     .join('\n')
-
-/**
- * A player's averages over some games, with the totals they come from (what
- * a writer would otherwise multiply out, and the check can't vouch for):
- * "4경기 평균 22.5점 7.5리바 3.3어시(총 90점 30리바 13어시)".
- */
-function averages(t: { games: number; totals: Record<string, number> }, columns: { col: string | null | undefined; unit: string }[]): string {
-  const shown = columns.filter((c): c is { col: string; unit: string } => Boolean(c.col))
-  if (shown.length === 0) return `${t.games}경기`
-  const avg = shown.map((c) => `${((t.totals[c.col] ?? 0) / t.games).toFixed(1)}${c.unit}`).join(' ')
-  const total = shown.map((c) => `${t.totals[c.col] ?? 0}${c.unit}`).join(' ')
-  return `${t.games}경기 평균 ${avg}${t.games > 1 ? `(총 ${total})` : ''}`
-}
-
-const streakText = (streak: string) => {
-  const m = /^([WL])(\d+)$/.exec(streak)
-  return m && Number(m[2]) >= 2 ? `${m[2]}${m[1] === 'W' ? '연승' : '연패'}` : ''
-}
 
 /**
  * The regular season so far for these players and schools, worked out by

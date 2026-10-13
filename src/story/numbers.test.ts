@@ -223,6 +223,17 @@ describe('unknownNumbers', () => {
     expect(unknown('3경기', '')).toEqual(['3경기'])
   })
 
+  it("doesn't check a long post's section numbers at a line's start, only what they number", () => {
+    const post = '범인 찾기 글 아님\n\n3. 두 번째 기점\n리바 33 대 45\n4) 대안\n**5. 마치며**\n7.의외로 접전'
+    expect(unknown(post, '리바 33 대 45')).toEqual(['7'])
+    expect(unknown('3. 가람고 47점 폭발', '')).toEqual(['47점'])
+    // Mid-line, or with a unit, it's a number like any other.
+    expect(unknown('그래서 3. 이게 문제', '')).toEqual(['3'])
+    expect(unknown('3점. 그게 끝', '')).toEqual(['3점'])
+    // In the facts it stays a number: a table's "3. 가람고" is where a "3위" comes from.
+    expect(unknown('가람고 3위', '3. 가람고 5승 2패')).toEqual([])
+  })
+
   it('reads the cast as who may write, not as facts', () => {
     const context = [
       '# 이 경기',

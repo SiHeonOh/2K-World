@@ -99,7 +99,8 @@ export const communityText = {
     title: '커뮤니티 설정',
     intro: '게시판 이름, 커뮤니티 사람들, 새로고침과 하루 한도, 잡담 주제, 작업별 모델을 정해요. 저장하면 바로 적용돼요.',
     topics: '잡담 주제',
-    topicsHelp: '경기가 없을 때 게시판에 올라오는 글의 주제와 비율이에요. 끄면 그 주제는 안 나오고, 5면 자주 나와요. 새로고침마다 섞여서 나와요.',
+    topicsHelp:
+      '경기가 없을 때 게시판에 올라오는 글의 주제와 비율이에요. 끄면 그 주제는 안 나오고, 5면 자주 나와요. 새로고침마다 섞여서 나와요. 글 길이는 실제 커뮤니티처럼 한 줄짜리가 가장 많고, 장문(분석 글 포함)은 하루 2개까지예요.',
     topicOff: '끔',
     topicNames: {
       lore_story: '선수·학교 이야기',
@@ -117,6 +118,7 @@ export const communityText = {
       school_pride: '학교 부심',
       poll: '투표',
       game_talk: '지난 경기',
+      analysis: '분석 글',
     } as Record<string, string>,
     topicHelp: {
       lore_story: '로어의 공개 이야기, 별명 유래, 플레이 스타일',
@@ -134,6 +136,7 @@ export const communityText = {
       school_pride: '응원가, 전통, 에이스 자랑',
       poll: 'MVP 등 투표',
       game_talk: '지난 경기 다시 씹기',
+      analysis: '기자나 분석러가 쓰는 장문: 연승·연패, 의외의 성적, 선수 상승세, 맞대결 프리뷰, 순위 싸움, 에이스 비교를 시즌 기록으로 뜯어봐요. 글이 길어서 AI 사용량을 더 써요.',
     } as Record<string, string>,
     enabled: '커뮤니티 켜기 (끄면 새 글을 쓰지 않아요)',
     myNick: '내 닉네임',
@@ -165,7 +168,8 @@ export const communityText = {
     help: {
       fans: '학교별 팬 규모(팀 로어의 fans.size)에 맞춰 나눠요.',
       reporters: '가상의 매체 소속 기자예요.',
-      maxSpice: '5는 욕설, 키배, 조리돌림까지 써요. 패드립, 혐오, 부상 조롱, 승부조작 드립, 성적인 내용은 어떤 단계에서도 안 써요.',
+      maxSpice:
+        '3부터 욕이 섞이고, 4~5는 욕설, 키배, 원색적인 까기와 조리돌림이 기본이에요(가상의 선수와 학교 대상). 패드립, 실제 지역·인종 비하, 부상 조롱, 승부조작 드립, 선수에 대한 성적인 내용, 실존 인물은 어떤 단계에서도 안 써요.',
       potenAt: '',
       bestAt: '',
       revealPerRefresh: '',
