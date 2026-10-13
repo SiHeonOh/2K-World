@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
 import { openDb, type Db } from '@data/db'
-import { listPlayers, seedLeague } from '@data/league'
+import { currentSeason, listPlayers, seedLeague } from '@data/league'
 import { listGames, recordScore, startSeason } from '@data/season'
 import { addSuggestion, expireOld, getSuggestion, listSuggestions } from '@data/suggestions'
 import { loreFor, readLeague } from '@story/context'
@@ -166,6 +166,40 @@ describe('what the review found', () => {
   const P1: LoreJobTarget = { key: 'P1', target: { kind: 'player', playerId: 'p1' }, name: '가가가', ref: '가가가', parts: null }
   const P2: LoreJobTarget = { key: 'P2', target: { kind: 'player', playerId: 'p2' }, name: '가나나', ref: '가나나', parts: null }
   const ask = (s: Record<string, unknown>) => suggestionPatch(readLeague(db, dir), [P1, P2], P1, s.kind as never, { target: 'P1', reason: '', ...s } as never)
+
+  it('a story card is a story: a box-score line is dropped, three a round at most, one per player', () => {
+    // A game's numbers retold is no lore (the box score is kept already); one telling number is.
+    expect(ask({ kind: 'fact', section: 'public', text: '개막전에서 야투 21/33, 3점 7/12로 50점을 넣었지만 팀은 78-91로 졌다.' })).toBeNull()
+    expect(ask({ kind: 'fact', section: 'public', text: '개막전에서 50점을 넣고도 졌다. 팬들은 이 경기를 "혼자 하는 농구"의 시작으로 꼽는다.' })?.patch).toEqual({
+      public: '개막전에서 50점을 넣고도 졌다. 팬들은 이 경기를 "혼자 하는 농구"의 시작으로 꼽는다.',
+    })
+
+    const roster = listPlayers(db).slice(0, 5)
+    const targets: LoreJobTarget[] = roster.map((p, i) => ({ key: `P${i + 1}`, target: { kind: 'player', playerId: p.id }, name: p.name, ref: p.name, parts: null }))
+    const input = { model: 'sonnet', context: '', instructions: '', targets, posts: [], seasonId: currentSeason(db).id, round: 1 }
+    const id = Number(
+      db.prepare("INSERT INTO jobs (kind, status, priority, input, created_at) VALUES ('lore_suggest', 'running', 12, ?, ?)").run(JSON.stringify(input), new Date().toISOString())
+        .lastInsertRowid,
+    )
+    const story = (key: string, text: string) => ({ kind: 'fact', target: key, section: 'public', text, reason: '' })
+    const output = {
+      suggestions: [
+        story('P1', '첫 경기에서 버저비터를 넣었다.'),
+        story('P1', '같은 경기에서 감독과 언성을 높였다.'),
+        story('P2', '주장 완장을 두고 팀 안에서 말이 나오기 시작했다.'),
+        story('P3', '데뷔전에서 벤치를 지키다 4쿼터에만 뛰고 승부를 뒤집었다.'),
+        story('P4', '라이벌전에서 결승 자유투를 놓쳤다.'),
+        story('P5', '전학 온 첫 주에 별명이 생겼다.'),
+      ],
+    }
+    const kind = loreKinds(db, dir).find((k) => k.kind === 'lore_suggest')!
+    kind.accept!(output as never, { id, kind: 'lore_suggest', status: 'running', priority: 12, input } as never)
+    const facts = listSuggestions(db, 'pending').filter((s) => s.kind === 'fact')
+    const of = (s: (typeof facts)[number]) => (s.target as { playerId: string }).playerId
+    expect(facts.map(of).sort()).toEqual(roster.slice(0, 3).map((p) => p.id).sort())
+    // The first of P1's two is the one kept.
+    expect(facts.find((s) => of(s) === roster[0]!.id)!.patch).toEqual({ public: '첫 경기에서 버저비터를 넣었다.' })
+  })
 
   it('keeps secret relationships out of both jobs and never rewrites one', async () => {
     writeFileSync(

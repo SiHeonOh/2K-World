@@ -7,6 +7,7 @@ import { blankParts, cleanLoreText, restrictPatch, sanitizePatch, worthDrafting,
 import type { LoreEditable } from '@lore/edit'
 import { GM_TRAITS, PLAYER_TRAITS } from '@shared/lore'
 import { type ModelName, aiFor, type EffortLevel } from '@shared/config/schema'
+import { numberTokens } from '@shared/numbers'
 import { playedMode, roundLabel } from '@shared/played'
 import { SWEEP_KINDS, type LorePatch, type SuggestionTarget } from '@shared/suggestions'
 import { storyValue } from '@data/community'
@@ -155,12 +156,23 @@ const DRAFT_INSTRUCTIONS = `자료의 "대상" 각각에 대해 로어 초안을
 - 선수: ego 자존심(대우받고 싶은 마음), usage 볼 욕심, competitiveness 승부욕, loyalty 학교·팀에 대한 애정, temperament 다혈질(높을수록 쉽게 폭발), professionalism 프로 의식(높을수록 나쁜 일에서 빨리 회복), ambition 야망(에이스·기록 욕심).
 - 단장: risk 모험심, patience 인내심, loyalty 자기 선수 애정, star_chasing 스타 욕심, defense_first 수비 중시, regional_pride 지역 부심, ego 체면.`
 
-const SUGGEST_INSTRUCTIONS = `이번 라운드에서 로어로 남길 만한 것을 골라 suggestions에 쓴다. 많아도 8개, 정말 남길 만한 것만. 없으면 빈 배열.
+const SUGGEST_INSTRUCTIONS = `이번 라운드에서 로어로 남길 만한 것을 골라 suggestions에 쓴다. 많아도 6개, 정말 남길 만한 것만. 대부분의 라운드는 0~3개면 충분하다. 없으면 빈 배열.
 - nickname: 팬들이 글에서 실제로 붙인 별명이나, 이번 라운드의 활약에 딱 맞는 별명. 이미 있는 별명은 제외.
 - relationship: 대상끼리 생긴 라이벌, 앙숙, 우정. 경기나 글에 근거가 있을 때만. 확실하지 않으면 visibility를 rumor로.
 - trait: 성격이 바뀔 만한 일이 있었을 때만, 지금 값에서 1만큼.
-- fact: 로어에 남길 1~2문장(공개, 또는 확인 안 된 이야기면 소문). 기록 숫자는 자료와 똑같이.
-- source에는 근거("글 12", "R5 경기"), reason에는 왜 남길 만한지 한 줄.`
+- fact: 기록이 아니라 이야기다. 경기 기록과 박스스코어는 앱과 위키에 이미 다 남아 있으니, 기록을 문장으로 옮겨 적는 카드는 쓰지 않는다.
+  - 남길 것: 그 선수나 학교를 보는 눈이 바뀌는 일, 이야기가 시작되는 일. 처음 있는 일, 이변, 논란, 팀 안의 에이스 논쟁, 갈등이나 화해, 별명이 생긴 순간, 팬들이 두고두고 꺼낼 장면.
+  - 남기지 않을 것: 그냥 잘한 경기, 평소 하던 만큼의 활약, 기록 나열.
+  - 팬이나 위키가 나중에 다시 꺼내 말할 법하게 쓴다: 무슨 일이 있었고, 그게 그 사람에게 왜 의미가 있는지. 1~2문장.
+  - 숫자는 이야기의 핵심일 때만 하나("50점을 넣고도 졌다"), 자료와 똑같이. 야투·3점·리바운드 같은 기록 줄은 쓰지 않는다.
+  - fact는 한 라운드에 많아야 3개, 한 대상에 하나. 그 대상의 로어에 이미 있는 이야기나 같은 뜻의 이야기는 다시 쓰지 않는다.
+  - 팬들 사이의 말이나 해석이면 section을 rumor로.
+- source에는 근거("글 12", "R5 경기"), reason에는 왜 이 일이 그 대상의 이야기로 남을 만한지 한 줄.`
+
+/** A story card made of numbers is a box score, not lore: past this many it's dropped. */
+const FACT_MAX_NUMBERS = 2
+/** Story cards a round may bring, and one per school or player. */
+const FACTS_PER_ROUND = 3
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -525,7 +537,7 @@ export function suggestionPatch(
     case 'fact': {
       const section = s.section === 'rumor' ? 'rumor' : 'public'
       const text = cleanLoreText(s.text, 400)
-      if (!text) return null
+      if (!text || numberTokens(text).length > FACT_MAX_NUMBERS) return null
       return { patch: { [section]: text }, dedupe: `fact:${k}:${section}:${hash32(nfc(text))}` }
     }
   }
@@ -538,13 +550,17 @@ function acceptSuggest(db: Db, folder: string, output: LoreSuggestOutput, job: J
   const modes = loadConfig(db).config.lore.suggest
   const now = Date.now()
   const auto: number[] = []
+  // Story cards: a few a round, one per school or player (the instructions ask the same).
+  const storied = new Set<string>()
   transaction(db, () => {
     for (const s of output.suggestions.slice(0, 12)) {
       const kind = (SWEEP_KINDS as readonly string[]).includes(oneLine(s.kind, 20)) ? (oneLine(s.kind, 20) as SweepKind) : null
       const t = input.targets.find((x) => x.key === oneLine(s.target, 10))
       if (!kind || !t || (modes[kind] ?? 'ask') === 'off') continue
+      if (kind === 'fact' && (storied.size >= FACTS_PER_ROUND || storied.has(targetKey(t.target)))) continue
       const made = suggestionPatch(league, input.targets, t, kind, s)
       if (!made) continue
+      if (kind === 'fact') storied.add(targetKey(t.target))
       const post = Number(oneLine(s.source, 40).match(/글\s*(\d+)/)?.[1])
       const r = addSuggestion(
         db,
