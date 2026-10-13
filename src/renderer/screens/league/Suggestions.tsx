@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { GM_TRAITS, MEDIA_STYLES, NEGOTIATION_STYLES, PHILOSOPHIES, PLAYER_TRAITS, RELATIONSHIP_TYPES, VISIBILITIES, type LoreRelationship } from '@shared/lore'
 import { cleanLoreText, cutText } from '@shared/secretText'
+import type { PushTopic } from '@shared/api'
 import type { ApproveResult, LorePatch, SuggestionKind, SuggestionView } from '@shared/suggestions'
 import { call } from '../../api'
 import { Badge, ErrorBox, Loading, Notice, Segmented, Select } from '../../components/ui'
-import { useLoad } from '../../hooks'
+import { useLoad, usePush } from '../../hooks'
 import { t } from '../../i18n'
 import { useLeague } from './LeagueLayout'
 import { AutoTextarea, Scale } from './lore/controls'
@@ -26,6 +27,9 @@ const revealErrorText = (error: string) =>
   (error.startsWith('stale:') ? ts.revealStale[error.slice('stale:'.length)] : undefined) ?? ts.revealErrors[error] ?? ts.revealErrors[error.split(':')[0]!] ?? errorText(error)
 
 /** The lore suggestion inbox: every card waiting for you, grouped by where it came from. */
+/** A job queued, started or cancelled: the drafts count may have changed. */
+const WAITING_TOPIC: PushTopic[] = ['waiting']
+
 export function SuggestionInbox({ onCount }: { onCount?: (n: number) => void }) {
   const { league, reload: reloadLeague } = useLeague()
   // "R5 이후", or "5일차 이후" in 2K 일정대로.
@@ -46,6 +50,8 @@ export function SuggestionInbox({ onCount }: { onCount?: (n: number) => void }) 
     const id = setInterval(reload, 4000)
     return () => clearInterval(id)
   }, [working])
+  // Drafts asked for or cancelled elsewhere (로어, 최근 작업) while this is open: the count follows.
+  usePush(league.slug, WAITING_TOPIC, reload)
   useEffect(() => {
     if (list.state === 'ready') onCount?.(list.value.length)
   }, [list])
