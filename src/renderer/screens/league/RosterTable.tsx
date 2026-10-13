@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import type { LeagueSnapshot, PlayerRow } from '@shared/league'
 import { formatHeight } from '@shared/height'
+import { ratingShort } from '@shared/labels'
 import { GradeBadge, OvrBadge } from '../../components/ui'
 import { t } from '../../i18n'
 import { gradeLabels } from './util'
@@ -81,12 +82,12 @@ export function RosterTable({
     return list
   }, [players, sort, slotIndex, teamIndex, scale])
 
-  const header = (key: SortKey, label: string, className = '') => {
+  const header = (key: SortKey, label: string, className = '', title?: string) => {
     const id = JSON.stringify(key)
     const same = JSON.stringify(sort.key) === id
     // A button inside the header, so sorting works from the keyboard too.
     return (
-      <th key={id} className={`sortable ${className}`} aria-sort={same ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
+      <th key={id} className={`sortable ${className}`} aria-sort={same ? (sort.desc ? 'descending' : 'ascending') : 'none'} title={title}>
         <button
           type="button"
           className="sort"
@@ -108,7 +109,8 @@ export function RosterTable({
             {header({ kind: 'slot' }, t.office.slot)}
             {header({ kind: 'name' }, t.office.name)}
             {header({ kind: 'height' }, t.office.height)}
-            {config.ratings.columns.map((c) => header({ kind: 'rating', id: c.id }, c.name, 'center'))}
+            {/* Korean names (the sheet's own on hover); positions stay short in this dense table. */}
+            {config.ratings.columns.map((c) => header({ kind: 'rating', id: c.id }, ratingShort(c), 'center', ratingShort(c) === c.name ? undefined : t.wiki.ratingSource(c.name)))}
             <th>{t.office.nicknames}</th>
           </tr>
         </thead>

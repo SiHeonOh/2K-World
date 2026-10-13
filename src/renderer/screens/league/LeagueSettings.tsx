@@ -11,7 +11,7 @@ import { t } from '../../i18n'
 import { initialState, type Edit, type WizardState } from '../setup/state'
 import { issueText } from '../setup/StepIssues'
 import { PeriodicAwardsCard, SeasonAwardsCard } from '../setup/steps/AwardsStep'
-import { SlotsCard } from '../setup/steps/RosterStep'
+import { RatingLabelsCard, SlotsCard } from '../setup/steps/RosterStep'
 import { DraftCard, TradesCard } from '../setup/steps/RulesStep'
 import { CalendarCard, PlayoffsCard, ScheduleCard, StandingsCard } from '../setup/steps/SeasonStep'
 import { ConferencesCard, DivisionsCard } from '../setup/steps/StructureStep'
@@ -119,6 +119,10 @@ export function LeagueSettings() {
       <Section {...sectionProps('trades')}>
         <TradesCard state={draft} edit={edit} />
         <p className="help">{ts.oncePerSeasonTip}</p>
+      </Section>
+
+      <Section {...sectionProps('labels')}>
+        <RatingLabelsCard state={draft} edit={edit} />
       </Section>
 
       <Section {...sectionProps('roster')}>

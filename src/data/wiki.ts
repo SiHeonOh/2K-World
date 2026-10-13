@@ -285,6 +285,43 @@ export function sectionKeys(body: string): Map<string, string> {
 }
 
 /**
+ * Sets one section's own text (by key, see sectionKeys), keeping its heading
+ * and its [각주]/분류 lines, which go after the new text. Null when the page
+ * has no such section.
+ */
+export function setSectionText(body: string, key: string, text: string): string | null {
+  const sections = splitWikiSections(body)
+  const seen = new Map<string, number>()
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i]!
+    const title = s.title ?? ''
+    const n = (seen.get(title) ?? 0) + 1
+    seen.set(title, n)
+    if (`${title}#${n}` !== key) continue
+    const lines = s.text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n')
+    const head = s.title === null ? [] : [lines[0]!]
+    const body = s.title === null ? lines : lines.slice(1)
+    // The blank lines before the next heading stay, and so do those between the text and its closing
+    // [각주]/분류 lines, so a diff shows only the text that changed.
+    let blanks = 0
+    while (blanks < body.length && body[body.length - 1 - blanks]!.trim() === '') blanks++
+    const rest = body.slice(0, body.length - blanks)
+    const trailer = rest.filter((l) => TRAILER_LINE.test(l))
+    const first = rest.findIndex((l) => TRAILER_LINE.test(l))
+    let gap = 0
+    while (first > 0 && gap < first && rest[first - 1 - gap]!.trim() === '') gap++
+    const own = text.replace(/\r\n?/g, '\n').replace(/\s+$/, '')
+    const lines2 = own ? own.split('\n') : []
+    const next = [...head, ...lines2, ...Array<string>(trailer.length && lines2.length ? gap : 0).fill(''), ...trailer]
+    const ends = s.text.endsWith('\n') || i < sections.length - 1
+    // An emptied preamble leaves nothing behind (not even a blank line).
+    sections[i] = { ...s, text: next.length === 0 ? '' : [...next, ...Array<string>(blanks).fill('')].join('\n') + (ends ? '\n' : '') }
+    return sections.map((x) => x.text).join('')
+  }
+  return null
+}
+
+/**
  * Sections whose current text is what you (not an AI editor) last wrote, by
  * key (see sectionKeys), with that text. A section is yours when the latest
  * revision that changed it was yours.

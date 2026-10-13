@@ -37,6 +37,7 @@ export const aiModelsText = {
     wiki: { name: '위키 편집', help: '라운드와 트레이드 뒤 위키에 붙는 작은 메모' },
     wikiTalk: { name: '위키 토론', help: '토론에 단 내 글에 대한 편집자들의 답, 내가 고친 서술에 대한 반박' },
     wikiWar: { name: '편집 분쟁', help: '편집자끼리 서술이 갈릴 때의 되돌리기 싸움과 토론' },
+    wikiPlayer: { name: '선수 문서', help: '선수 문서의 플레이 스타일과 개요 (라운드 뒤, 능력치나 로어가 바뀐 뒤, 위키의 선수 문서 다듬기)' },
     player: { name: '선수들의 말', help: '트레이드, 기분, 수상 뒤 선수 인터뷰와 SNS' },
     loreDraft: { name: '로어 초안', help: '로어 → AI 초안 (제안함에서 승인)' },
     loreSweep: { name: '라운드 로어 제안', help: '라운드마다 별명, 관계, 성격 변화 제안과 드러난 비밀 확인' },

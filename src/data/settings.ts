@@ -32,7 +32,7 @@ const locked = (code: string, params: SectionLock['params'] = {}): SectionLock =
 
 /**
  * When each section can change, by the season's phase:
- * - teams, who runs them, awards and trade rules: any time;
+ * - teams, who runs them, awards, trade rules and rating columns' Korean names (display only): any time;
  * - roster rules: any time but the draft (swaps move players by slot), and only if today's rosters fit them;
  * - the playoff format and tiebreakers: until the playoffs start (they seed them), then from the next preseason;
  * - draft settings: any time but the draft itself;
@@ -49,6 +49,7 @@ export function sectionLocks(phase: Phase): Record<SettingsSection, SectionLock>
     control: OPEN,
     awards: OPEN,
     trades: OPEN,
+    labels: OPEN,
     roster: phase === 'draft' ? locked('settings-during-draft') : OPEN,
     playoffs: phase === 'preseason' || phase === 'regular' ? OPEN : locked('settings-playoffs-started', { phase }),
     draft: phase === 'draft' ? locked('settings-during-draft') : OPEN,

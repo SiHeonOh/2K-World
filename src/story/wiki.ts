@@ -1,7 +1,22 @@
 import type { LeagueConfig } from '@shared/config/schema'
+import { splitWikiSections } from '@shared/namumark'
+import { setStoryValue, storyValue } from '@data/community'
 import type { Db } from '@data/db'
 import { currentSeason, listPlayers, listTeams } from '@data/league'
-import { normalTitle, pageByRef, pageByTitle, revisionBody, saveRevision, SYSTEM, titlesByRef } from '@data/wiki'
+import {
+  normalTitle,
+  pageById,
+  pageByRef,
+  pageByTitle,
+  revisionBody,
+  saveRevision,
+  sectionAuthors,
+  sectionKeys,
+  setSectionText,
+  SYSTEM,
+  titlesByRef,
+  TRAILER_LINE,
+} from '@data/wiki'
 import type { LoreLinks } from '@lore/folder'
 import type { PlayerRow } from '@shared/league'
 import type { Team } from '@shared/setup'
@@ -9,9 +24,10 @@ import type { Team } from '@shared/setup'
 /**
  * Seeds the wiki: one page per player, team, the league, the current season,
  * the rules, the awards and the draft, plus a page per world lore topic.
- * Seeded text is a starting point written by "2K World"; the infobox and the
- * [기록]/[역사]/[정보] macros stay live from the league data. Existing pages
- * are never touched.
+ * Seeded text is a starting point written by "2K World"; the infobox, the
+ * [기록]/[역사]/[정보]/[인간관계] macros and the text a player page shows in
+ * its empty 개요 and 플레이 스타일 stay live from the league data. Existing
+ * pages are never touched, but for the one-time layout upgrade (upgradeWiki).
  */
 
 export interface WikiTitles {
@@ -128,36 +144,36 @@ export function particle(word: string, withFinal: string, without: string): stri
 
 const bullets = (items: string[]) => items.map((i) => ` * ${i}`).join('\n')
 
-function playerPage(config: LeagueConfig, titles: WikiTitles, p: PlayerRow, lore: LoreLinks): string {
+/** A player page's sections that show the app's own text while they're empty (main/wiki.ts writes it, live). */
+export const OVERVIEW = '개요'
+export const PLAY_STYLE = '플레이 스타일'
+export const AUTO_SECTIONS: readonly string[] = [OVERVIEW, PLAY_STYLE]
+/** Where [인간관계] lists a player's public ties from lore. */
+export const RELATIONS = '인간관계'
+
+/**
+ * A player's page as Namuwiki lays one out: 개요, his career (시즌별 활약
+ * with its table and a paragraph per season, then 역사's timeline), 플레이
+ * 스타일, 인간관계, 별명, 여담. 개요 and 플레이 스타일 start empty: the page
+ * shows text the app writes from the league (his school, part and lore; his
+ * grades) until an editor or you write there. The macros fill from the league
+ * as it is; sections with nothing to show are left out of the article (but
+ * stay here, for editors to fill).
+ */
+function playerPage(titles: WikiTitles, p: PlayerRow, lore: LoreLinks): string {
   const team = titles.team.get(p.teamId) ?? ''
-  const slot = config.roster.slots.find((s) => s.id === p.slotId)?.name
-  const grades = config.ratings.columns.filter((c) => c.kind === 'grade')
-  const scale = config.ratings.gradeScale
-  const value = (label: unknown) => scale.find((g) => g.label === label)?.value ?? null
-  const graded = grades
-    .map((c) => ({ name: c.name, grade: p.ratings[c.id], v: value(p.ratings[c.id]) }))
-    .filter((g): g is { name: string; grade: string; v: number } => typeof g.grade === 'string' && g.v !== null)
-    .sort((a, b) => b.v - a.v)
-  const strengths = graded.slice(0, 2).filter((g) => g.v >= (scale[2]?.value ?? 0))
-  const entry = lore.player.get(p.id)
-  const loreText = entry?.sections.public ?? ''
-  const rumors = entry?.sections.rumor ?? ''
-  const nick = p.nicknames.length ? ` 별명은 ${p.nicknames.map((n) => `'''${n}'''`).join(', ')}.` : ''
+  const rumors = lore.player.get(p.id)?.sections.rumor ?? ''
   return [
     '[목차]',
-    '== 개요 ==',
-    `'''${p.name}'''${particle(p.name, '은', '는')} [[${team}]] 소속${slot ? ` ${slot}` : ''} 선수다.${nick}`,
-    loreText,
-    '== 플레이 스타일 ==',
-    strengths.length
-      ? `${strengths.map((g) => `${g.name}(${g.grade})`).join(', ')}${particle(strengths.at(-1)!.name, '이', '가')} 강점으로 꼽힌다.`
-      : '아직 정리되지 않았다.',
-    graded.length ? bullets(graded.map((g) => `${g.name}: ${g.grade}`)) : '',
+    `== ${OVERVIEW} ==`,
     '== 시즌별 활약 ==',
     '[기록]',
     '== 역사 ==',
     '[역사]',
-    ...(p.nicknames.length ? ['== 별명 ==', bullets(p.nicknames)] : []),
+    `== ${PLAY_STYLE} ==`,
+    `== ${RELATIONS} ==`,
+    '[인간관계]',
+    '== 별명 ==',
     '== 여담 ==',
     rumors ? bullets(rumors.split('\n').filter((l) => l.trim()).map((l) => `카더라: ${l.trim()}`)) : '',
     '[각주]',
@@ -168,24 +184,193 @@ function playerPage(config: LeagueConfig, titles: WikiTitles, p: PlayerRow, lore
     .join('\n')
 }
 
+/** The layout pages are on now; pages seeded before it are brought up to it once (upgradeWiki). */
+const LAYOUT_MARK = 'wiki-layout'
+const LAYOUT = '2'
+
+type Section = ReturnType<typeof splitWikiSections>[number]
+
+/** Where a section ends: past its subsections. */
+function sectionEnd(sections: readonly Section[], at: number): number {
+  let end = at + 1
+  while (end < sections.length && sections[end]!.level > sections[at]!.level) end++
+  return end
+}
+
+/**
+ * Puts a new section (heading and text) right after `after` (and its
+ * subsections), else, or when that's the page's last section (which holds
+ * the closing [각주] and 분류 lines), just before those lines.
+ */
+function insertSection(body: string, title: string, text: string, after: string): string {
+  const sections = splitWikiSections(body)
+  const at = sections.findIndex((s) => s.title === after)
+  const chunk = `== ${title} ==\n${text ? `${text}\n` : ''}`
+  const end = at >= 0 ? sectionEnd(sections, at) : -1
+  if (end >= 0 && end < sections.length) {
+    sections.splice(end, 0, { title, level: 2, text: chunk })
+    return sections.map((s) => s.text).join('')
+  }
+  const lines = body.replace(/\n+$/, '').split('\n')
+  let last = lines.length
+  while (last > 0 && (TRAILER_LINE.test(lines[last - 1]!) || lines[last - 1]!.trim() === '')) last--
+  return [...lines.slice(0, last), chunk.trimEnd(), ...lines.slice(last)].join('\n')
+}
+
+/**
+ * Moves sections (with their subsections) to just before the first of
+ * `before` there is. The page as it was when none of `before` is there, or
+ * when a section to move is the last one (it holds the closing lines).
+ */
+function moveSections(body: string, titles: readonly string[], before: readonly string[]): string {
+  const sections = splitWikiSections(body)
+  if (!sections.some((s) => s.title !== null && before.includes(s.title))) return body
+  const moved: Section[] = []
+  for (const title of titles) {
+    const at = sections.findIndex((s) => s.title === title)
+    if (at < 0) continue
+    const end = sectionEnd(sections, at)
+    if (end === sections.length) return body
+    moved.push(...sections.splice(at, end - at))
+  }
+  const to = sections.findIndex((s) => s.title !== null && before.includes(s.title))
+  sections.splice(to, 0, ...moved)
+  return sections.map((s) => s.text).join('')
+}
+
+/**
+ * Brings pages seeded before the Korean layout up to it, once per league.
+ * - A player's page: what 2K World seeded and nobody changed since goes (the
+ *   개요 line, "… 소속 SF 선수다.", and the 플레이 스타일 rating list), so
+ *   the page shows the app's live text there instead. An editor's lines in
+ *   플레이 스타일 stay (only the seeded ones go); a section you changed last
+ *   stays as it is. [인간관계] comes after 플레이 스타일, and both move after
+ *   the career sections (시즌별 활약, 역사), as on Namuwiki, while the page
+ *   is still in the order it was seeded in.
+ * - A school's page: an empty 상세 after 개요 and 향후 전망 before 여담
+ *   (left out of the article until someone writes there), and 로스터, as 2K
+ *   World seeded it, becomes 선수단.
+ * Saved as 2K World ('문서 양식 갱신'), so it's no one's edit, and moving a
+ * section changes no one's text in it. Returns how many pages changed.
+ */
+export function upgradeWiki(db: Db, nowMs: number): number {
+  if (storyValue(db, LAYOUT_MARK) === LAYOUT) return 0
+  let changed = 0
+  for (const { id, kind } of db.prepare("SELECT id, kind FROM wiki_pages WHERE kind IN ('player', 'team') AND current_rev IS NOT NULL ORDER BY id").all() as {
+    id: number
+    kind: string
+  }[]) {
+    try {
+      if (kind === 'player' ? upgradePlayerPage(db, id, nowMs) : upgradeTeamPage(db, id, nowMs)) changed++
+    } catch (e) {
+      console.warn(`[wiki] could not bring page ${id} up to the new layout`, e)
+    }
+  }
+  setStoryValue(db, LAYOUT_MARK, LAYOUT)
+  return changed
+}
+
+/** The titles of a page's sections, in order. */
+const titlesOf = (body: string) => splitWikiSections(body).flatMap((s) => (s.title === null ? [] : [s.title]))
+
+function upgradePlayerPage(db: Db, pageId: number, nowMs: number): boolean {
+  const page = pageById(db, pageId)
+  if (!page || page.currentRev === null) return false
+  const body = revisionBody(db, page.id, page.currentRev)!.body
+  const first = revisionBody(db, page.id, 1)
+  const seeded = first?.authorId === SYSTEM ? sectionKeys(first.body) : new Map<string, string>()
+  const authors = sectionAuthors(db, page.id)
+  let next = body
+  for (const title of AUTO_SECTIONS) {
+    const key = `${title}#1`
+    const last = authors.get(key)
+    if (!last || last.text === '' || last.author === 'me') continue
+    if (last.author === SYSTEM) {
+      next = setSectionText(next, key, '') ?? next
+    } else if (title === PLAY_STYLE) {
+      // An editor wrote below the seeded list: the seeded lines go, theirs stay.
+      const old = new Set((seeded.get(key) ?? '').split('\n').filter((l) => l.trim() !== ''))
+      const lines = last.text.split('\n')
+      const kept = lines.filter((l) => !old.has(l))
+      if (kept.length < lines.length) next = setSectionText(next, key, kept.join('\n').trim()) ?? next
+    }
+  }
+  if (!sectionKeys(next).has(`${RELATIONS}#1`)) {
+    next = titlesOf(next).includes(PLAY_STYLE) ? insertSection(next, RELATIONS, '[인간관계]', PLAY_STYLE) : insertSection(next, RELATIONS, '[인간관계]', '역사')
+  }
+  // Still in the seeded order (플레이 스타일 before the career): the career comes first now.
+  const order = titlesOf(next)
+  if (order.indexOf(PLAY_STYLE) >= 0 && order.indexOf(PLAY_STYLE) < order.indexOf('시즌별 활약')) {
+    next = moveSections(next, [PLAY_STYLE, RELATIONS], ['별명', '논란 및 사건 사고', '여담'])
+  }
+  if (next === body) return false
+  saveRevision(db, { title: page.title, body: next, authorId: SYSTEM, summary: '문서 양식 갱신', baseRev: page.currentRev }, nowMs)
+  return true
+}
+
+function upgradeTeamPage(db: Db, pageId: number, nowMs: number): boolean {
+  const page = pageById(db, pageId)
+  if (!page || page.currentRev === null) return false
+  const body = revisionBody(db, page.id, page.currentRev)!.body
+  let next = body
+  const has = (title: string) => titlesOf(next).includes(title)
+  if (!has('상세') && has(OVERVIEW)) next = insertSection(next, '상세', '', OVERVIEW)
+  // 로스터 as seeded (its heading over the live table) is Namuwiki's 선수단.
+  const roster = sectionAuthors(db, page.id).get('로스터#1')
+  if (!has('선수단') && roster?.author === SYSTEM) next = next.replace(/^== 로스터 ==$/m, '== 선수단 ==')
+  if (!has('향후 전망') && has('여담')) {
+    const sections = splitWikiSections(next)
+    const at = sections.findIndex((s) => s.title === '여담')
+    sections.splice(at, 0, { title: '향후 전망', level: 2, text: '== 향후 전망 ==\n' })
+    next = sections.map((s) => s.text).join('')
+  }
+  if (next === body) return false
+  saveRevision(db, { title: page.title, body: next, authorId: SYSTEM, summary: '문서 양식 갱신', baseRev: page.currentRev }, nowMs)
+  return true
+}
+
+/** Names that already say they're a conference, or a division. */
+const CONFERENCE_WORD = /컨퍼런스|콘퍼런스|conference|리그|지구/i
+const DIVISION_WORD = /디비전|division|지구|조$/i
+
+/**
+ * A school's conference and division as its pages name them ("동 컨퍼런스",
+ * "북 디비전"); a name that already says what it is ("동부 지구") stays as
+ * it is. Either is left out when the league has none.
+ */
+export function schoolPlace(config: LeagueConfig, divisionId: string): string[] {
+  const division = config.structure.divisions.find((d) => d.id === divisionId)
+  const conference = config.structure.conferences.find((c) => c.id === division?.conferenceId)
+  const named = (name: string | undefined, word: RegExp, kind: string) => (!name?.trim() ? '' : word.test(name) ? name.trim() : `${name.trim()} ${kind}`)
+  return [named(conference?.name, CONFERENCE_WORD, '컨퍼런스'), named(division?.name, DIVISION_WORD, '디비전')].filter(Boolean)
+}
+
+/**
+ * A school's page, as Namuwiki lays one out: 개요, 상세 (its standing, its
+ * style, its weak spots: for editors to write), 선수단 (the live roster),
+ * 시즌별 성적, 최근 경기, 라이벌, 향후 전망, 여담. Empty ones are left out of
+ * the article until someone writes there.
+ */
 function teamPage(config: LeagueConfig, titles: WikiTitles, t: Team, lore: LoreLinks): string {
   const division = config.structure.divisions.find((d) => d.id === t.divisionId)
   const conference = config.structure.conferences.find((c) => c.id === division?.conferenceId)
   const entry = lore.team.get(t.id)
   const rivals = entry?.kind === 'team' ? entry.settings.rivals : []
-  const where = [conference?.name, division?.name].filter(Boolean).join(' ')
+  const where = schoolPlace(config, t.divisionId).join(' ')
   return [
     '[목차]',
     '== 개요 ==',
-    `'''${t.name}'''${t.name === t.shortName ? '' : `(${t.shortName})`}${particle(t.shortName, '은', '는')} [[${titles.league}]]${where ? `의 ${where}` : ''}에 속한 학교다.`,
+    `'''${t.name}'''${t.name === t.shortName ? '' : `(${t.shortName})`}의 농구부. [[${titles.league}]]${where ? ` ${where}` : ''} 소속.`,
     entry?.sections.public ?? '',
-    '== 로스터 ==',
+    '== 상세 ==',
+    '== 선수단 ==',
     '[정보]',
     '== 시즌별 성적 ==',
     '[기록]',
     '== 최근 경기 ==',
     '[최근경기]',
     ...(rivals.length ? ['== 라이벌 ==', bullets(rivals.map((r) => `[[${r}]]`))] : []),
+    '== 향후 전망 ==',
     '== 여담 ==',
     '[각주]',
     `[[분류:${conference?.name ?? '학교'}]]`,
@@ -370,7 +555,7 @@ export function seedWiki(db: Db, config: LeagueConfig, lore: LoreLinks, nowMs: n
   make('draft', 'draft', titles.draft, () => draftPage(config, titles))
   make('season', String(season.id), titles.season, () => seasonPage(titles, season.label))
   for (const t of teams) make('team', t.id, titles.team.get(t.id)!, () => teamPage(config, titles, t, lore))
-  for (const p of players) make('player', p.id, titles.player.get(p.id)!, () => playerPage(config, titles, p, lore))
+  for (const p of players) make('player', p.id, titles.player.get(p.id)!, () => playerPage(titles, p, lore))
   for (const w of lore.world) {
     if (w.kind !== 'world') continue
     make('topic', `world:${w.settings.id}`, w.settings.id, () => topicPage(w.settings.id, w.sections.public, w.sections.rumor, w.settings.involves))

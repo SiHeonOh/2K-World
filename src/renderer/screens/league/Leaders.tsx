@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { leaderLabel } from '@shared/labels'
 import { call } from '../../api'
 import { Field, Loading, NumberInput } from '../../components/ui'
 import { useLoad } from '../../hooks'
@@ -44,7 +45,7 @@ export function Leaders() {
             .map((b) => (
               <div key={b.key} className="card">
                 <div className="card-head">
-                  <h3>{b.label}</h3>
+                  <h3>{leaderLabel(league.config, b)}</h3>
                   <span className="muted">{b.kind === 'percent' ? t.leaders.percent : t.leaders.perGame}</span>
                 </div>
                 <ol className="leader-list">

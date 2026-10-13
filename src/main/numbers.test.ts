@@ -32,6 +32,7 @@ import {
   type WikiWarInput,
   type WikiWarOutput,
 } from '@story/wikiTalk'
+import { WIKI_PLAYER, WIKI_PLAYER_PRIORITY, wikiPlayerDemo, wikiPlayerKind } from '@story/wikiPlayer'
 import { AiService } from './ai'
 import { StoryService } from './story'
 import { WikiService } from './wiki'
@@ -670,6 +671,7 @@ describe('the demo writer', () => {
     )
     wired.addKinds((d) => wikiTalkKinds(d, { hooks: { requeue: (k, i) => void queue().enqueue(k, i, TALK_PRIORITY) } }), wikiTalkDemo)
     wired.addKinds((d) => [reactionKind(d, dir, { requeue: (i) => void queue().enqueue(PLAYER_REACTION, i, REACTION_PRIORITY), changed: () => {} })], reactionDemo)
+    wired.addKinds((d) => [wikiPlayerKind(d, () => null, { requeue: (i) => void queue().enqueue(WIKI_PLAYER, i, WIKI_PLAYER_PRIORITY) })], wikiPlayerDemo)
     await wired.refresh()
     const drain = async () => {
       for (let i = 0; i < 6; i++) {
@@ -718,7 +720,7 @@ describe('the demo writer', () => {
       startPlayoffs(db)
       await play((g) => g.stage !== 'regular')
       const done = new Set((db.prepare("SELECT kind FROM jobs WHERE status = 'done'").all() as { kind: string }[]).map((j) => j.kind))
-      expect([...done]).toEqual(expect.arrayContaining(['post_game_thread', 'event_thread', 'chatter_batch', 'wiki_edits', 'wiki_war', 'player_reaction']))
+      expect([...done]).toEqual(expect.arrayContaining(['post_game_thread', 'event_thread', 'chatter_batch', 'wiki_edits', 'wiki_war', 'player_reaction', 'wiki_player']))
       expect(db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE json_extract(input, '$.numberRetry') IS NOT NULL").get()).toEqual({ n: 0 })
       expect(allFlags()).toEqual([])
     } finally {

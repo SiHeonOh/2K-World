@@ -7,6 +7,7 @@ import { blankParts, cleanLoreText, restrictPatch, sanitizePatch, worthDrafting,
 import type { LoreEditable } from '@lore/edit'
 import { GM_TRAITS, PLAYER_TRAITS } from '@shared/lore'
 import { type ModelName, aiFor, type EffortLevel } from '@shared/config/schema'
+import { positionOf, ratingLabel } from '@shared/labels'
 import { numberTokens } from '@shared/numbers'
 import { playedMode, roundLabel } from '@shared/played'
 import { SWEEP_KINDS, type LorePatch, type SuggestionTarget } from '@shared/suggestions'
@@ -247,12 +248,18 @@ function heightText(cm: number | null, raw: string, unit: 'ft-in' | 'cm'): strin
   return ` · ${Math.floor(inches / 12)}피트 ${inches % 12}인치`
 }
 
-/** A player's ratings, as one short line in the league's own columns. */
+/** A player's ratings, as one short line under the columns' Korean names ("운동능력 A"). */
 function ratingLine(league: League, ratings: Record<string, unknown>): string {
   return league.config.ratings.columns
     .filter((c) => ratings[c.id] !== undefined && ratings[c.id] !== null)
-    .map((c) => `${c.name} ${String(ratings[c.id])}`)
+    .map((c) => `${ratingLabel(c)} ${String(ratings[c.id])}`)
     .join(', ')
+}
+
+/** The overall column's Korean name ("종합 능력치"), for the lines that give it alone. */
+const overallName = (league: League) => {
+  const c = league.config.ratings.columns.find((x) => x.id === league.config.ratings.overallColumnId)
+  return c ? ratingLabel(c) : '종합 능력치'
 }
 
 /**
@@ -266,7 +273,7 @@ export function draftInput(league: League, teamId: string, picks: { target: Sugg
   if (!team) return null
   const roster = listPlayers(db)
   const mine = roster.filter((p) => p.teamId === teamId)
-  const slot = (id: string | null) => config.roster.slots.find((s) => s.id === id)?.name ?? ''
+  const slot = (id: string | null) => positionOf(config, id)
   // Team strength rank, so a GM and the fans fit how good the school is.
   const valued = roster.map((p) => ({ id: p.id, teamId: p.teamId, slotId: p.slotId, value: playerValue(config, p.ratings) }))
   const strengths = [...league.teams.keys()].map((id) => ({ id, s: teamStrength(config, valued.filter((v) => v.teamId === id)) })).sort((a, b) => b.s - a.s)
@@ -303,7 +310,7 @@ export function draftInput(league: League, teamId: string, picks: { target: Sugg
   })
   const ovr = config.ratings.overallColumnId
   const ovrs = ovr ? roster.map((p) => p.ratings[ovr]).filter((v): v is number => typeof v === 'number') : []
-  const scale = ovrs.length ? `OVR 범위 ${Math.min(...ovrs)}~${Math.max(...ovrs)}, 평균 ${Math.round(ovrs.reduce((a, b) => a + b, 0) / ovrs.length)}` : ''
+  const scale = ovrs.length ? `${overallName(league)} 범위 ${Math.min(...ovrs)}~${Math.max(...ovrs)}, 평균 ${Math.round(ovrs.reduce((a, b) => a + b, 0) / ovrs.length)}` : ''
   const blocks = [
     `# 리그\n${config.league.name} · ${league.teams.size}개 학교 · ${currentSeason(db).label}${scale ? ` · ${scale}` : ''}\n능력치 등급: ${config.ratings.gradeScale.map((g) => g.label).join(' > ')}`,
     `# 학교: ${team.shortName} (${team.name})${division ? ` · ${division.name} 지구` : ''} · 전력 순위 ${rank}/${league.teams.size}`,
@@ -436,14 +443,16 @@ export function suggestInput(league: League, seasonId: number, round: number): L
     ...playerIds.map((id, i): LoreJobTarget => ({ key: `P${i + 1}`, target: { kind: 'player', playerId: id }, name: playerName(league, id), ref: refOf(league, id), parts: null })),
     ...teamIds.map((id, i): LoreJobTarget => ({ key: `S${i + 1}`, target: { kind: 'team', teamId: id }, name: short(league, id), ref: short(league, id), parts: null })),
   ]
-  const slot = (id: string | null) => config.roster.slots.find((s) => s.id === id)?.name ?? ''
+  const slot = (id: string | null) => positionOf(config, id)
   const ovr = config.ratings.overallColumnId
   const targetBlock = targets.map((t) => {
     const out: string[] = []
     if (t.target.kind === 'player') {
       const p = roster.find((x) => x.id === (t.target as { playerId: string }).playerId)!
       const o = ovr ? p.ratings[ovr] : undefined
-      out.push(`${t.key} · ${p.name} (${short(league, p.teamId)}, ${slot(p.slotId)}${o !== undefined ? `, OVR ${String(o)}` : ''})${p.nicknames.length ? ` · 별명: ${p.nicknames.map((n) => said(n, 30)).join(', ')}` : ''}`)
+      out.push(
+        `${t.key} · ${p.name} (${short(league, p.teamId)}, ${slot(p.slotId)}${o !== undefined ? `, ${overallName(league)} ${String(o)}` : ''})${p.nicknames.length ? ` · 별명: ${p.nicknames.map((n) => said(n, 30)).join(', ')}` : ''}`,
+      )
     } else out.push(`${t.key} · ${t.name} (학교)`)
     for (const l of loreLines(loreEntryOf(league, t.target), 300)) out.push(`  ${l}`)
     // A waiting reveal holds a secret: the sweep never sees it.

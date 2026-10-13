@@ -62,9 +62,10 @@ describe('AI models and effort per job', () => {
     const partial = leagueConfigSchema.parse({ ...sampleConfig(), ai: { jobs: { wiki: { model: 'opus' } } } })
     expect(partial.ai.jobs.wiki).toEqual({ model: 'opus', effort: 'default' })
     expect(partial.ai.jobs.reply).toEqual({ model: 'haiku', effort: 'default' })
-    // Jobs added later (the wiki's 토론 and wars) start from 위키 편집 until they're set themselves.
+    // Jobs added later (the wiki's 토론, wars and player pages) start from 위키 편집 until they're set themselves.
     expect(partial.ai.jobs.wikiTalk).toEqual({ model: 'opus', effort: 'default' })
     expect(partial.ai.jobs.wikiWar).toEqual({ model: 'opus', effort: 'default' })
+    expect(partial.ai.jobs.wikiPlayer).toEqual({ model: 'opus', effort: 'default' })
     const own = leagueConfigSchema.parse({ ...sampleConfig(), ai: { jobs: { wiki: { model: 'opus', effort: 'max' }, wikiWar: { model: 'haiku' } } } })
     expect([own.ai.jobs.wikiTalk, own.ai.jobs.wikiWar]).toEqual([
       { model: 'opus', effort: 'max' },

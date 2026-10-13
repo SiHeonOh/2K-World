@@ -30,7 +30,10 @@ export const wikiText = {
   cancel: '취소',
   preview: '미리보기',
   write: '편집하기',
-  syntax: "문법: == 제목 ==, '''굵게''', [[문서]], [[문서|보이는 글]], [* 각주], * 목록, || 표 ||, {{{#!folding 제목 … }}}, [목차], [기록], [역사]",
+  syntax: "문법: == 제목 ==, '''굵게''', [[문서]], [[문서|보이는 글]], [* 각주], * 목록, || 표 ||, {{{#!folding 제목 … }}}, [목차], [기록], [역사], [인간관계]",
+  /** Under the editor: what empty sections do on the page. */
+  emptySections:
+    '내용이 없는 문단은 문서에 나오지 않아요(여기서는 그대로 보여요). 선수 문서의 개요와 플레이 스타일이 비어 있으면 앱이 능력치와 로어로 쓴 기본 설명이 나오고, 글을 쓰면 그 글이 대신 나와요.',
   historyTitle: (title: string) => `${title} (역사)`,
   backlinksTitle: (title: string) => `${title} (역링크)`,
   noBacklinks: '이 문서로 링크한 문서가 없어요.',
@@ -108,6 +111,24 @@ export const wikiText = {
     page: '문서',
   } as Record<string, string>,
   history2: '역사',
-  emptyRecord: '아직 기록이 없어요.',
-  emptyHistory: '아직 남길 만한 일이 없어요.',
+  /** Hover hint on the text the app writes for an empty 개요 or 플레이 스타일 (only you see it). */
+  autoHint: '앱이 능력치와 로어로 쓴 기본 설명이에요. 편집해서 이 문단에 글을 쓰면 그 글이 대신 나와요.',
+  /** Hover hint on a 2K rating whose name is a translation. */
+  ratingSource: (name: string) => `2K 이름: ${name}`,
+  /** The folded block of a player's ratings in his infobox, closed until opened. */
+  foldRatings: (what: string) => `[ ${what} 펼치기 · 접기 ]`,
+  playerPages: {
+    title: '선수 문서 다듬기',
+    help: '아직 앱이 쓴 기본 설명이 나오는 선수 문서(또는 능력치나 로어가 바뀐 뒤 다시 써야 하는 문서)의 플레이 스타일과 개요를 AI 편집자들이 나무위키처럼 써요. 학교마다 6명 안팎씩 묶어 한 작업으로 맡기고, 커뮤니티 잡담보다 뒤에 차례를 기다려요. 내가 쓰거나 고친 문단은 건드리지 않아요. 라운드가 끝나면 그 라운드의 활약 선수 문서는 따로 맡기지 않아도 써요.',
+    start: '선수 문서 다듬기',
+    counting: '세는 중…',
+    nothing: '다듬을 선수 문서가 없어요. 모두 AI 편집자나 내가 쓴 글이 있거나, 이미 작업이 기다리고 있어요.',
+    confirm: (players: number, jobs: number, model: string) =>
+      `선수 ${players}명의 문서를 다듬어요. 작업 ${jobs}건이 AI 모델 '선수 문서' 설정(${model})으로 돌아요. 커뮤니티 잡담보다 뒤에 차례를 기다리고, 편집실 → AI 모델 → 최근 작업에서 언제든 취소할 수 있어요. 맡길까요?`,
+    queued: (players: number, jobs: number) => `선수 ${players}명의 문서를 작업 ${jobs}건으로 맡겼어요.`,
+    waiting: (waiting: number, running: number) => `선수 문서 작업: 대기 ${waiting}건${running ? ` · 실행 중 ${running}건` : ''}`,
+    cancel: '대기 중인 작업 모두 취소',
+    confirmCancel: (n: number) => `기다리는 선수 문서 작업 ${n}건을 모두 취소할까요? 실행 중인 작업은 끝까지 해요.`,
+    cancelled: (n: number) => `${n}건을 취소했어요.`,
+  },
 }

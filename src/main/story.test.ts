@@ -364,14 +364,14 @@ describe('StoryService (demo writer)', () => {
       wikiEditKind(db).accept!({ edits, disputes: [] }, { id, input } as unknown as JobRow)
       return revisionBody(db, after.id, current())!.body
     }
-    const stale = accept(after.currentRev! - 1, [edit('시즌 1', 'replace', '늦게 온 덮어쓰기.'), edit('개요', 'append', '늦게 온 덧붙임.')])
+    const stale = accept(after.currentRev! - 1, [edit('시즌 1', 'replace', '늦게 온 덮어쓰기.'), edit('별명', 'append', '늦게 온 덧붙임.')])
     expect(stale).toContain('늦게 온 덧붙임.')
     expect(stale).not.toContain('늦게 온 덮어쓰기.')
     expect(accept(current(), [edit('시즌 1', 'replace', '늦게 온 덮어쓰기.')])).toContain('=== 시즌 1 ===\n늦게 온 덮어쓰기.\n')
     // Writing in the table's place lands in the season paragraph instead.
     expect(accept(current(), [edit('시즌별 활약', 'append', '표 자리에 쓴 글.')])).toContain('[기록]\n=== 시즌 1 ===\n늦게 온 덮어쓰기.\n표 자리에 쓴 글.\n== 역사 ==')
     // A section longer than the editors were shown can't be rewritten: they'd drop what they never saw.
-    const long = '긴 개요. '.repeat(100)
+    const long = '긴 개요. '.repeat(120)
     const longBody = revisionBody(db, after.id, current())!.body.replace('== 개요 ==\n', `== 개요 ==\n${long}\n`)
     saveRevision(db, { title: ace.name, body: longBody, authorId: 'system', summary: '긴 개요' }, Date.now())
     expect(accept(current(), [edit('개요', 'replace', '짧은 개요.')])).toContain(long.trim())
@@ -1044,7 +1044,7 @@ describe('StoryService (demo writer)', () => {
     new WikiService().ensure(db, dir, true)
     const names = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'].map(nameOf)
     const id = Number(db.prepare("INSERT INTO jobs (kind, status, input, created_at) VALUES ('wiki_edits', 'done', '{}', ?)").run(new Date().toISOString()).lastInsertRowid)
-    const edits = names.flatMap((page) => ['개요', '여담'].map((section) => ({ page, section, mode: 'append' as const, text: '덧붙임.', summary: '편집', editor: 'f001' })))
+    const edits = names.flatMap((page) => ['별명', '여담'].map((section) => ({ page, section, mode: 'append' as const, text: '덧붙임.', summary: '편집', editor: 'f001' })))
     const input = { pages: names, editors: ['f001'], context: '', instructions: '' }
     wikiEditKind(db).accept!({ edits, disputes: [] }, { id, input } as unknown as JobRow)
     expect((db.prepare('SELECT COUNT(*) AS n FROM wiki_revisions WHERE job_id = ?').get(id) as { n: number }).n).toBe(14)

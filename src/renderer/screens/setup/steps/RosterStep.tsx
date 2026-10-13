@@ -1,3 +1,5 @@
+import type { RatingColumn } from '@shared/config/schema'
+import { builtInRatingLabel, ratingLabel } from '@shared/labels'
 import type { Edit, WizardState } from '../state'
 import { Check, Field, NumberInput, RowControls, Segmented, Select, TextInput, move } from '../../../components/ui'
 import { t } from '../../../i18n'
@@ -121,6 +123,55 @@ export function SlotsCard({ state, edit }: { state: WizardState; edit: Edit }) {
   )
 }
 
+/** A rating column's Korean name: blank shows the dictionary's (the placeholder), or its own name when the dictionary doesn't know it. */
+function LabelInput({ col, onChange }: { col: RatingColumn; onChange: (v: string) => void }) {
+  return (
+    <TextInput
+      compact
+      ariaLabel={t.app.cellLabel(col.name, t.wizard.roster.label)}
+      value={col.label ?? ''}
+      placeholder={builtInRatingLabel(col.name) ?? col.name}
+      invalid={(col.label ?? '').trim().length > 20}
+      onChange={onChange}
+    />
+  )
+}
+
+/** The rating columns' Korean names, for 리그 설정: only what's shown changes, so they can change any time. */
+export function RatingLabelsCard({ state, edit }: { state: WizardState; edit: Edit }) {
+  const { columns } = state.setup.config.ratings
+  return (
+    <div className="card flush">
+      <div style={{ padding: '14px 16px 0' }}>
+        <h2>{t.wizard.roster.labels}</h2>
+        <p className="help">{t.wizard.roster.labelsHelp}</p>
+      </div>
+      <div className="table-wrap" style={{ marginTop: 10 }}>
+        <table className="data">
+          <thead>
+            <tr>
+              <th>{t.wizard.roster.columnName}</th>
+              <th>{t.wizard.roster.label}</th>
+              <th>{t.wizard.roster.shownAs}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {columns.map((col, i) => (
+              <tr key={col.id}>
+                <td>{col.name}</td>
+                <td>
+                  <LabelInput col={col} onChange={(v) => edit((s) => void (s.setup.config.ratings.columns[i]!.label = v))} />
+                </td>
+                <td>{ratingLabel(col)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 /** Rating columns, the grade scale and the height unit. */
 function RatingsCards({
   edit,
@@ -144,6 +195,7 @@ function RatingsCards({
               <tr>
                 <th>{t.wizard.roster.id}</th>
                 <th>{t.wizard.roster.columnName}</th>
+                <th title={t.wizard.roster.labelsHelp}>{t.wizard.roster.label}</th>
                 <th>{t.wizard.roster.kind}</th>
                 <th>{t.wizard.roster.min}</th>
                 <th>{t.wizard.roster.max}</th>
@@ -165,6 +217,9 @@ function RatingsCards({
                       value={col.name}
                       onChange={(v) => edit((s) => void (s.setup.config.ratings.columns[i]!.name = v))}
                     />
+                  </td>
+                  <td>
+                    <LabelInput col={col} onChange={(v) => edit((s) => void (s.setup.config.ratings.columns[i]!.label = v))} />
                   </td>
                   <td>{t.wizard.roster.kinds[col.kind]}</td>
                   <td>

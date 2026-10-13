@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router'
 import type { PlayerRow } from '@shared/league'
 import { rosterProblems, type PlayerEdit, type RosterSaveResult } from '@shared/roster'
 import { parseHeightCm } from '@shared/height'
+import { ratingShort } from '@shared/labels'
 import { folderKey, isFolderSafe } from '@shared/setup'
 import { call } from '../../api'
 import { IssueList, Notice } from '../../components/ui'
@@ -285,9 +286,10 @@ export function RosterEditor() {
               <th>{tr.slot}</th>
               <th className="sticky">{tr.name}</th>
               <th>{tr.height}</th>
+              {/* Korean names; the sheet's own name (what 2K and imports use) on hover. */}
               {config.ratings.columns.map((c) => (
-                <th key={c.id} title={c.kind === 'number' ? tr.rangeHelp(c.min, c.max) : tr.gradeHelp}>
-                  {c.name}
+                <th key={c.id} title={`${tr.columnSource(c.name)} · ${c.kind === 'number' ? tr.rangeHelp(c.min, c.max) : tr.gradeHelp}`}>
+                  {ratingShort(c)}
                 </th>
               ))}
               <th>{tr.nicknames}</th>

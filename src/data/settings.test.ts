@@ -77,16 +77,16 @@ function to(db: Db, phase: Phase) {
 }
 
 describe('when each section can change', () => {
-  it('follows the season: teams, control, awards and trades any time; the rest at their own times', () => {
+  it('follows the season: teams, control, awards, trades and rating names any time; the rest at their own times', () => {
     const open = (phase: Phase) =>
       Object.entries(sectionLocks(phase))
         .filter(([, l]) => l.open)
         .map(([s]) => s)
-    expect(open('preseason')).toEqual(['teams', 'control', 'awards', 'trades', 'roster', 'playoffs', 'draft', 'structure', 'schedule'])
-    expect(open('regular')).toEqual(['teams', 'control', 'awards', 'trades', 'roster', 'playoffs', 'draft'])
-    expect(open('playoffs')).toEqual(['teams', 'control', 'awards', 'trades', 'roster', 'draft'])
-    expect(open('draft')).toEqual(['teams', 'control', 'awards', 'trades'])
-    expect(open('offseason')).toEqual(['teams', 'control', 'awards', 'trades', 'roster', 'draft', 'structure'])
+    expect(open('preseason')).toEqual(['teams', 'control', 'awards', 'trades', 'labels', 'roster', 'playoffs', 'draft', 'structure', 'schedule'])
+    expect(open('regular')).toEqual(['teams', 'control', 'awards', 'trades', 'labels', 'roster', 'playoffs', 'draft'])
+    expect(open('playoffs')).toEqual(['teams', 'control', 'awards', 'trades', 'labels', 'roster', 'draft'])
+    expect(open('draft')).toEqual(['teams', 'control', 'awards', 'trades', 'labels'])
+    expect(open('offseason')).toEqual(['teams', 'control', 'awards', 'trades', 'labels', 'roster', 'draft', 'structure'])
     expect(sectionLocks('playoffs').playoffs).toEqual({ open: false, code: 'settings-playoffs-started', params: { phase: 'playoffs' } })
     expect(sectionLocks('offseason').schedule.code).toBe('settings-schedule-next')
   })
@@ -177,6 +177,24 @@ describe('teams', () => {
     })
     // Screens reload when a team changes.
     expect(factsStamp(db)).toBeGreaterThan(stamp)
+  })
+
+  it('gives rating columns Korean names any time, even during the draft; a blank one goes back to the dictionary', () => {
+    const db = league()
+    to(db, 'draft')
+    const r = save(db, (s) => void (s.ratingLabels.shoot = ' 슛 감각 '))
+    expect(r).toMatchObject({ changed: ['labels'] })
+    expect(r.version).toBeGreaterThan(1)
+    expect(loadConfig(db).config.ratings.columns.map((c) => [c.id, c.label])).toEqual([
+      ['ovr', undefined],
+      ['shoot', '슛 감각'],
+    ])
+    expect(listEvents(db, 'config_changed').at(-1)!.payload).toMatchObject({ sections: ['labels'] })
+    // Blank again: no label stored, so the column shows the dictionary's name (Shooting → 슈팅).
+    save(db, (s) => void (s.ratingLabels.shoot = '  '))
+    expect(loadConfig(db).config.ratings.columns.find((c) => c.id === 'shoot')).not.toHaveProperty('label')
+    // A blank left blank isn't a change.
+    expect(save(db, (s) => void (s.ratingLabels.ovr = ''))).toMatchObject({ changed: [] })
   })
 
   it('refuses the same short name twice, a short name a player has, and adding or dropping teams', () => {

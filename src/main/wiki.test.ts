@@ -69,7 +69,8 @@ describe('WikiService', () => {
     expect(teamPage.data.recent?.rows[0]?.cells[2]).toBe('승 90:80')
     const title = db.prepare("SELECT title FROM wiki_pages WHERE kind = 'player' AND ref_id = ?").get(star.id) as { title: string }
     const playerPage = wiki.page(db, dir, title.title)
-    expect(playerPage.data.infobox?.rows[0]).toMatchObject({ label: '소속', value: team.shortName })
+    // 소속: the school's full name, linked to its page.
+    expect(playerPage.data.infobox?.rows[0]).toMatchObject({ label: '소속', value: team.name, link: team.shortName })
     expect(playerPage.data.record?.rows[0]?.cells.slice(2, 4)).toEqual(['1', '33.0'])
     expect(playerPage.data.history.map((h) => h.text)).toEqual([expect.stringContaining('33점')])
   })
@@ -85,9 +86,9 @@ describe('WikiService', () => {
       { playerId: 'p2', slotId: 'pg' },
     ])
     const benched = wiki.page(db, dir, titleOf('p5'))
-    expect(benched.data.infobox?.rows.find((r) => r.label === '포지션')?.value).toBe('Bench')
-    expect(benched.data.history.map((h) => h.text)).toEqual(['벤치로 이동 (C → Bench)'])
-    expect(wiki.page(db, dir, titleOf('p6')).data.history.map((h) => h.text)).toEqual(['주전 발탁 (Bench → C)'])
+    expect(benched.data.infobox?.rows.find((r) => r.label === '포지션')?.value).toBe("'''벤치 멤버'''")
+    expect(benched.data.history.map((h) => h.text)).toEqual(['벤치로 이동 (센터 → 벤치 멤버)'])
+    expect(wiki.page(db, dir, titleOf('p6')).data.history.map((h) => h.text)).toEqual(['주전 발탁 (벤치 멤버 → 센터)'])
     expect(wiki.page(db, dir, titleOf('p2')).data.history).toEqual([])
   })
 
@@ -121,7 +122,7 @@ describe('WikiService', () => {
     const team = wiki.page(db, dir, short(p11!.teamId))
     const links = team.data.roster!.rows.filter((r) => r.cells[0] === '같은이름').map((r) => r.link)
     expect(links.sort()).toEqual([page1, `같은이름(${short(p11!.teamId)})`].sort())
-    expect(wiki.page(db, dir, page1).data.infobox?.rows[0]?.value).toBe(short(p11!.teamId))
+    expect(wiki.page(db, dir, page1).data.infobox?.rows[0]).toMatchObject({ value: listTeams(db).find((t) => t.id === p11!.teamId)!.name, link: short(p11!.teamId) })
   })
 
   it("refiles a moved player's page under the new school, leaving the rest as written", () => {

@@ -7,7 +7,7 @@ import type { Team } from './setup'
  * (`src/data/settings.ts`) and refuses with a reason code otherwise.
  */
 
-export const SETTINGS_SECTIONS = ['teams', 'control', 'awards', 'trades', 'roster', 'playoffs', 'draft', 'structure', 'schedule'] as const
+export const SETTINGS_SECTIONS = ['teams', 'control', 'awards', 'trades', 'labels', 'roster', 'playoffs', 'draft', 'structure', 'schedule'] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 /**
@@ -17,10 +17,13 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
  * - control: who runs each team (AI GM, you, or frozen);
  * - structure: conferences, divisions, and each team's division;
  * - schedule: games per season, how rounds are built, and the calendar;
- * - playoffs: the playoff format and the tiebreakers that seed it.
+ * - playoffs: the playoff format and the tiebreakers that seed it;
+ * - labels: each rating column's Korean name ('' for the built-in one).
  */
 export interface LeagueSettingsInput {
   structure: LeagueConfig['structure']
+  /** Rating column id → the name shown for it; '' leaves it to the dictionary (shared/labels.ts). */
+  ratingLabels: Record<string, string>
   roster: LeagueConfig['roster']
   schedule: LeagueConfig['season']['schedule']
   calendar: LeagueConfig['season']['calendar']
@@ -93,6 +96,7 @@ export function changedSections(before: LeagueSettingsInput, after: LeagueSettin
   if (team((t) => t.control)) out.push('control')
   if (!same(before.awards, after.awards)) out.push('awards')
   if (!same(before.trades, after.trades)) out.push('trades')
+  if (!same(labelsOf(before.ratingLabels), labelsOf(after.ratingLabels))) out.push('labels')
   if (!same(before.roster, after.roster)) out.push('roster')
   if (!same(before.playoffs, after.playoffs) || !same(before.standings, after.standings)) out.push('playoffs')
   if (!same(effectiveDraft(before.draft), effectiveDraft(after.draft))) out.push('draft')
@@ -100,6 +104,10 @@ export function changedSections(before: LeagueSettingsInput, after: LeagueSettin
   if (!same(before.schedule, after.schedule) || !same(before.calendar, after.calendar)) out.push('schedule')
   return out
 }
+
+/** Labels as they'd be stored: trimmed, blanks left out. */
+const labelsOf = (labels: Record<string, string> | undefined) =>
+  Object.fromEntries(Object.entries(labels ?? {}).flatMap(([id, l]) => (l.trim() ? [[id, l.trim()]] : [])))
 
 /** A draft setting the engine no longer runs ('standard' never had a draft): read as none. */
 export function effectiveDraft(draft: LeagueConfig['draft']): LeagueConfig['draft'] {
@@ -110,6 +118,7 @@ export function effectiveDraft(draft: LeagueConfig['draft']): LeagueConfig['draf
 export function settingsOf(config: LeagueConfig, teams: Team[]): LeagueSettingsInput {
   return {
     structure: config.structure,
+    ratingLabels: Object.fromEntries(config.ratings.columns.map((c) => [c.id, c.label ?? ''])),
     roster: config.roster,
     schedule: config.season.schedule,
     calendar: config.season.calendar,
@@ -124,8 +133,14 @@ export function settingsOf(config: LeagueConfig, teams: Team[]): LeagueSettingsI
 
 /** The config with the settings' parts put in; everything else (community, AI, the league's name…) stays. */
 export function applySettings(config: LeagueConfig, input: LeagueSettingsInput): LeagueConfig {
+  const labels = labelsOf(input.ratingLabels)
   return {
     ...config,
+    // Only the names shown change: a blank one goes back to the dictionary's.
+    ratings: {
+      ...config.ratings,
+      columns: config.ratings.columns.map(({ label: _, ...c }) => (labels[c.id] ? { ...c, label: labels[c.id] } : c)),
+    },
     structure: input.structure,
     roster: input.roster,
     season: { ...config.season, schedule: input.schedule, calendar: input.calendar, standings: input.standings, playoffs: input.playoffs },

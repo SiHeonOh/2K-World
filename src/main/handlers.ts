@@ -193,6 +193,8 @@ const awardSchema = z.object({
 /** 리그 설정: the config parts it edits and every team; the engine checks timing and runs the wizard's setup check. */
 const settingsInputSchema = z.object({
   structure: structureSchema,
+  // The config check holds each label to its own limit.
+  ratingLabels: z.record(z.string().max(64), z.string().max(100)),
   roster: rosterSchema,
   schedule: scheduleSchema,
   calendar: calendarSchema,
@@ -735,6 +737,15 @@ export function createHandlers(deps: HandlerDeps): Handlers {
       return { ok: true as const }
     },
     'wiki.saveSettings': (slug, wiki) => ({ version: engine(() => ctx().wiki.saveSettings(db(slug), parse(wikiConfigSchema, wiki, 'wiki'))) }),
+    'wiki.playerPagesPlan': (slug) => {
+      const s = parse(slugSchema, slug, 'slug')
+      return engine(() => ctx().story.playerPagesPlan(ctx().leagues.dbFor(s), ctx().leagues.folderOf(s)))
+    },
+    'wiki.polishPlayerPages': (slug) => {
+      const s = parse(slugSchema, slug, 'slug')
+      return engine(() => ctx().story.polishPlayerPages(s, ctx().leagues.dbFor(s), ctx().leagues.folderOf(s)))
+    },
+    'wiki.playerPagesStatus': (slug) => ctx().story.playerPagesStatus(db(slug)),
     'lore.index': (slug) => {
       const s = parse(slugSchema, slug, 'slug')
       return ctx().lore.index(ctx().leagues.dbFor(s), ctx().leagues.folderOf(s))

@@ -3,12 +3,13 @@ import { useSearchParams } from 'react-router'
 import { parseWiki } from '@shared/namumark'
 import type { Infobox, WikiPageView, WikiRevisionView } from '@shared/wiki'
 import { ApiError, call } from '../../../api'
-import { ErrorBox, Loading } from '../../../components/ui'
+import { ErrorBox, GradeBadge, Loading } from '../../../components/ui'
 import { useLoad, usePush } from '../../../hooks'
 import { t } from '../../../i18n'
 import { useLeague } from '../LeagueLayout'
 import { RuleErrors } from '../RuleErrors'
-import { WikiRender } from './WikiRender'
+import { gradeLabels } from '../util'
+import { colorStyle, WikiInline, WikiRender } from './WikiRender'
 import { stamp, unsaved, type Go, type View } from './nav'
 import { RecentTalk, TalkList, ThreadView } from './Talk'
 
@@ -121,14 +122,27 @@ export function Wiki() {
   )
 }
 
-function InfoboxView({ box, onLink }: { box: Infobox; onLink: (t: string) => void }) {
-  const color = box.colors[0] ?? '#00a495'
-  const text = box.colors[1] ?? '#ffffff'
+/**
+ * The box at the top right, as Namuwiki's: the school (a player's) and the
+ * title in the school's colours, the facts (namumark where they link or bold),
+ * and the 2K ratings folded away until opened.
+ */
+function InfoboxView({ box, grades, existing, onLink }: { box: Infobox; grades: string[]; existing: Set<string>; onLink: (t: string) => void }) {
+  const colors = box.colors.length ? box.colors : ['#00a495']
+  const color = colors[0]!
+  const band = colorStyle(colors)
   return (
-    <table className="wk-infobox">
+    <table className="wk-infobox" style={{ borderColor: color }}>
       <thead>
+        {box.band ? (
+          <tr>
+            <th colSpan={2} className="wk-infobox-band" style={band}>
+              {box.band}
+            </th>
+          </tr>
+        ) : null}
         <tr>
-          <th colSpan={2} style={{ background: color, color: text }}>
+          <th colSpan={2} style={band}>
             <div className="wk-infobox-title">{box.title}</div>
             {box.subtitle ? <div className="wk-infobox-sub">{box.subtitle}</div> : null}
           </th>
@@ -143,12 +157,32 @@ function InfoboxView({ box, onLink }: { box: Infobox; onLink: (t: string) => voi
                 <a href="#" className="wk-link" onClick={(e) => (e.preventDefault(), onLink(r.link!))}>
                   {r.value}
                 </a>
+              ) : r.wiki ? (
+                <WikiInline text={r.value} existing={existing} onLink={onLink} />
               ) : (
                 r.value
               )}
+              {r.swatches?.map((c) => <span key={c} className="wk-swatch" style={{ background: c }} title={c} />)}
             </td>
           </tr>
         ))}
+        {box.ratings && box.ratings.rows.length ? (
+          <tr>
+            <td colSpan={2} className="wk-ratings-cell">
+              <details className="wk-ratings-fold">
+                <summary>{tw.foldRatings(box.ratings.title)}</summary>
+                <div className="wk-ratings">
+                  {box.ratings.rows.map((r) => (
+                    <div key={`${r.source}:${r.label}`} className="wk-rating" title={r.label === r.source ? undefined : tw.ratingSource(r.source)}>
+                      <span className="wk-rating-name">{r.label}</span>
+                      {r.grade ? <GradeBadge grade={r.value} scale={grades} /> : <b className="wk-rating-num">{r.value}</b>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </td>
+          </tr>
+        ) : null}
       </tbody>
     </table>
   )
@@ -185,6 +219,8 @@ function PageView({
   go: (next: Go) => void
   anchor: string | null
 }) {
+  const { league } = useLeague()
+  const grades = useMemo(() => gradeLabels(league.config), [league.config])
   const doc = useMemo(() => parseWiki(p.source), [p.source])
   const existing = useMemo(() => new Set(p.existing), [p.existing])
   useEffect(() => {
@@ -244,8 +280,8 @@ function PageView({
         </div>
       ) : (
         <div className="wk-content">
-          {p.data.infobox ? <InfoboxView box={p.data.infobox} onLink={(page) => onLink(page, null)} /> : null}
-          <WikiRender doc={doc} data={p.data} existing={existing} onLink={onLink} />
+          {p.data.infobox ? <InfoboxView box={p.data.infobox} grades={grades} existing={existing} onLink={(page) => onLink(page, null)} /> : null}
+          <WikiRender doc={doc} data={p.data} existing={existing} onLink={onLink} grades={grades} />
         </div>
       )}
     </article>
@@ -315,12 +351,13 @@ function Editor({ page: p, onDone, onCancel }: { page: WikiPageView; onDone: (ti
       </header>
       {preview && doc ? (
         <div className="wk-content wk-preview">
-          <WikiRender doc={doc} data={p.data} existing={new Set(p.existing)} onLink={() => {}} />
+          <WikiRender doc={doc} data={p.data} existing={new Set(p.existing)} onLink={() => {}} grades={gradeLabels(league.config)} />
         </div>
       ) : (
         <>
           <textarea className="wk-editor" value={source} onChange={(e) => setSource(e.target.value)} spellCheck={false} />
           <p className="sub wk-syntax">{tw.syntax}</p>
+          <p className="sub wk-syntax">{tw.emptySections}</p>
         </>
       )}
       <div className="wk-save">

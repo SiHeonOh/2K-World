@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseInline, parseWiki, plain, splitWikiSections } from './namumark'
+import { parseInline, parseWiki, plain, shownPage, splitWikiSections } from './namumark'
 
 describe('namumark inline', () => {
   it('reads emphasis, links, colours and sizes', () => {
@@ -250,5 +250,54 @@ describe('namumark tables', () => {
       t: 'table',
       rows: [[[{ t: 'text', v: '가' }], [{ t: 'text', v: '나' }]]],
     })
+  })
+})
+
+describe('the page as a reader sees it (shownPage)', () => {
+  const PLAYER = [
+    '[목차]',
+    '== 개요 ==',
+    '== 플레이 스타일 ==',
+    '== 인간관계 ==',
+    '[인간관계]',
+    '== 시즌별 활약 ==',
+    '[기록]',
+    '=== 시즌 1 ===',
+    '개막 후 세 경기에서 펄펄 날았다.[* 시즌 하이다.]',
+    '== 역사 ==',
+    '[역사]',
+    '== 별명 ==',
+    '== 여담 ==',
+    '[각주]',
+    '[[분류:선수]]',
+  ].join('\n')
+  const titles = (v: ReturnType<typeof shownPage>) => v.headings.map((h) => `${h.num} ${h.title}`)
+  const blocks = (v: ReturnType<typeof shownPage>) => v.blocks.map((b) => (b.t === 'h' ? `h:${plain(b.text)}` : b.t === 'macro' ? `[${b.name}${b.arg ? `:${b.arg}` : ''}]` : b.t))
+
+  it('leaves out sections with nothing to show, and numbers the rest without gaps', () => {
+    const doc = parseWiki(PLAYER)
+    const view = shownPage(doc, () => false)
+    expect(titles(view)).toEqual(['1 시즌별 활약', '1.1 시즌 1'])
+    expect(blocks(view)).toEqual(['[목차]', 'h:시즌별 활약', '[기록]', 'h:시즌 1', 'p'])
+    // The ids follow the numbers shown, so [[#s-1]] points where the 목차 does.
+    expect(view.headings.map((h) => h.id)).toEqual(['s-1', 's-1.1'])
+    // The parsed page itself is untouched (its 목차 still lists every heading), and its footnotes stay for the page's end.
+    expect(doc.headings).toHaveLength(8)
+    expect(doc.footnotes).toHaveLength(1)
+  })
+
+  it('keeps a section whose macro has data, and puts the app’s own text in an empty one that has some', () => {
+    const auto = (title: string) => title === '개요' || title === '플레이 스타일'
+    const view = shownPage(parseWiki(PLAYER), (m) => m === '역사' || m === '인간관계', auto)
+    expect(titles(view)).toEqual(['1 개요', '2 플레이 스타일', '3 인간관계', '4 시즌별 활약', '4.1 시즌 1', '5 역사'])
+    expect(blocks(view).slice(0, 6)).toEqual(['[목차]', 'h:개요', '[auto:개요]', 'h:플레이 스타일', '[auto:플레이 스타일]', 'h:인간관계'])
+    // A section with text of its own shows that text, not the app's.
+    const written = shownPage(parseWiki(PLAYER.replace('== 플레이 스타일 ==', '== 플레이 스타일 ==\n돌파가 일품이다.')), () => false, auto)
+    expect(blocks(written).slice(0, 6)).toEqual(['[목차]', 'h:개요', '[auto:개요]', 'h:플레이 스타일', 'p', 'h:시즌별 활약'])
+  })
+
+  it('keeps a parent for a subsection with something, and leaves out a parent whose subsections are all empty', () => {
+    const view = shownPage(parseWiki('== 가 ==\n=== 가1 ===\n=== 가2 ===\n내용.\n== 나 ==\n=== 나1 ===\n[역사]\n== 다 ==\n다의 글.'), () => false)
+    expect(titles(view)).toEqual(['1 가', '1.1 가2', '2 다'])
   })
 })

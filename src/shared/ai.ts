@@ -79,6 +79,7 @@ export const AI_JOB_OF_KIND: Readonly<Record<string, AiJob>> = {
   wiki_talk: 'wikiTalk',
   wiki_pushback: 'wikiTalk',
   wiki_war: 'wikiWar',
+  wiki_player: 'wikiPlayer',
   player_reaction: 'player',
   lore_draft: 'loreDraft',
   lore_suggest: 'loreSweep',

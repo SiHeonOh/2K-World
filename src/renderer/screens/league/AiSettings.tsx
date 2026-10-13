@@ -18,7 +18,7 @@ const EFFORTS: EffortSetting[] = ['default', 'low', 'medium', 'high', 'xhigh', '
 /** The jobs by where they show up, in the order a user meets them. */
 const GROUPS: { title: string; jobs: AiJob[] }[] = [
   { title: ta.groups.community, jobs: ['gameThread', 'article', 'chatter', 'reply', 'live'] },
-  { title: ta.groups.world, jobs: ['wiki', 'wikiTalk', 'wikiWar', 'player', 'loreDraft', 'loreSweep'] },
+  { title: ta.groups.world, jobs: ['wiki', 'wikiTalk', 'wikiWar', 'wikiPlayer', 'player', 'loreDraft', 'loreSweep'] },
   { title: ta.groups.gm, jobs: ['gmIntent', 'gmRespond', 'gmDraft'] },
   { title: ta.groups.gameday, jobs: ['screenshot'] },
 ]

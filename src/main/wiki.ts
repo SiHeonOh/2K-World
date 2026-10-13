@@ -3,6 +3,7 @@ import type { EventPayloads } from '@shared/events'
 import { parseWiki } from '@shared/namumark'
 import { rotationMove } from '@shared/roster'
 import type {
+  CellTone,
   HistoryItem,
   Infobox,
   WikiData,
@@ -16,13 +17,16 @@ import type {
   WikiThreadInput,
   WikiThreadSummary,
   WikiThreadView,
+  WikiRelation,
 } from '@shared/wiki'
+import { leagueChampion, seriesTitle } from '@shared/season'
+import { leaders, seasonTotals } from '@core/stats'
 import { setStoryValue, storyValue } from '@data/community'
 import { jsonField, transaction, type Db } from '@data/db'
 import { currentSeason, listEvents, listPlayers, listTeams, loadConfig, updateConfig } from '@data/league'
 import { addTalk, closeThread, commentCount, getThread, openDisputes, openThread, openThreadCount, recentThreads, reopenThread, talkLines, threadsOfPage, threadSummary } from '@data/talk'
 import { listAwards } from '@data/moves'
-import { standings } from '@data/season'
+import { playoffsView, seasonBoxLines, standings } from '@data/season'
 import {
   authorOf,
   backlinkCount,
@@ -42,10 +46,13 @@ import {
   type PageRow,
 } from '@data/wiki'
 import { diffText } from '@shared/diff'
+import { columnFor } from '@shared/boxcheck'
+import { bodyText, heightCm, positionOf, ratingLabel, ratingShort, SPLITS, statLabel } from '@shared/labels'
 import { playedMode, roundLabel } from '@shared/played'
 import { refuse } from '@data/rules'
-import { readLeague } from '@story/context'
-import { seedWiki, syncSchoolCategories, wikiTitles, type WikiTitles } from '@story/wiki'
+import { readLeague, type League } from '@story/context'
+import { autoOverview, fallbackPlayStyle, numberRanges, positionLine, ratedColumns, relationsOf, roleOf, specialties } from '@story/playerPage'
+import { OVERVIEW, PLAY_STYLE, schoolPlace, seedWiki, syncSchoolCategories, upgradeWiki, wikiTitles, type WikiTitles } from '@story/wiki'
 import { WIKI_TALK_KINDS } from '@story/wikiTalk'
 import type { PlayerRow } from '@shared/league'
 import type { Team } from '@shared/setup'
@@ -59,6 +66,21 @@ interface Ctx {
   titles: WikiTitles
   seasonLabels: Map<number, string>
   currentSeason: number
+  /** The league with its lore (read only for the pages that need it: players' and schools'). */
+  league: () => League
+}
+
+/** The stats a player's 시즌별 활약 table shows per game, in this order (those the league tracks). */
+const SEASON_STATS = ['points', 'rebounds', 'assists', 'steals', 'blocks'] as const
+/** And the shooting splits after them. */
+const SEASON_SPLITS = SPLITS.filter((s) => s.key !== 'ft%')
+
+/** A school's colours: its lore's when the file sets some, else 리그 설정's. */
+function schoolColors(league: League | null, team: Team | undefined): string[] {
+  if (!team) return []
+  const lore = league?.lore.team.get(team.id)
+  const own = lore?.kind === 'team' ? lore.settings.colors : []
+  return own.length ? own : team.colors
 }
 
 const STAGES: Record<string, string> = { regular: '정규', 'play-in': '플레이-인', playoffs: '플레이오프', finals: '파이널' }
@@ -97,8 +119,9 @@ export class WikiService {
     }
   }
 
-  /** Seeds missing pages (new players, a new season) at most once a minute. */
+  /** Seeds missing pages (new players, a new season) at most once a minute. Pages from before the Korean layout catch up first (once). */
   ensure(db: Db, folder: string, force = false): void {
+    upgradeWiki(db, Date.now())
     const last = storyValue(db, SEEDED)
     if (!force && pageCount(db) > 0 && last !== null && Date.now() - Date.parse(last) < 60_000) return
     const league = readLeague(db, folder)
@@ -106,7 +129,7 @@ export class WikiService {
     setStoryValue(db, SEEDED, new Date().toISOString())
   }
 
-  private ctx(db: Db): Ctx {
+  private ctx(db: Db, folder: string): Ctx {
     const { config } = loadConfig(db)
     const teams = listTeams(db)
     const players = listPlayers(db)
@@ -119,7 +142,16 @@ export class WikiService {
       player: new Map([...computed.player, ...titlesByRef(db, 'player')]),
       team: new Map([...computed.team, ...titlesByRef(db, 'team')]),
     }
-    return { config, teams, players, titles, seasonLabels: new Map(labels.map((s) => [s.id, s.label])), currentSeason: season.id }
+    let league: League | null = null
+    return {
+      config,
+      teams,
+      players,
+      titles,
+      seasonLabels: new Map(labels.map((s) => [s.id, s.label])),
+      currentSeason: season.id,
+      league: () => (league ??= readLeague(db, folder)),
+    }
   }
 
   home(db: Db, folder: string): string {
@@ -133,7 +165,7 @@ export class WikiService {
     // A moved player's page that missed its refiling (a move from before it existed) catches up when opened.
     if (found?.kind === 'player' && found.refId && rev === undefined) syncSchoolCategories(db, loadConfig(db).config, Date.now(), [found.refId])
     const page = pageByTitle(db, title)
-    const empty: WikiData = { infobox: null, record: null, history: [], roster: null, recent: null }
+    const empty: WikiData = { infobox: null, record: null, history: [], roster: null, recent: null, relations: [], auto: {} }
     if (!page || page.currentRev === null) {
       const talk: WikiPageTalk = { open: 0, disputes: [] }
       return {
@@ -154,7 +186,14 @@ export class WikiService {
     }
     const shown = rev !== undefined && rev >= 1 && rev <= page.currentRev ? rev : page.currentRev
     const body = revisionBody(db, page.id, shown)!
-    const links = parseWiki(body.body).links
+    const data = this.data(db, folder, page)
+    // The app's own text links too (a player's school, his ties, the infobox's rivals), and red links work there the same.
+    const links = [
+      ...parseWiki(body.body).links,
+      ...Object.values(data.auto).flatMap((text) => parseWiki(text).links),
+      ...data.relations.flatMap((r) => (r.link ? [r.link] : [])),
+      ...(data.infobox?.rows ?? []).flatMap((r) => (r.wiki ? parseWiki(r.value).links : [])),
+    ]
     return {
       title: page.title,
       exists: true,
@@ -166,7 +205,7 @@ export class WikiService {
       author: authorOf(db, body.authorId),
       existing: existingTitles(db, links),
       backlinks: backlinkCount(db, page.title),
-      data: this.data(db, page),
+      data,
       talk: { open: openThreadCount(db, page.id), disputes: openDisputes(db, page.id).map((d) => ({ threadId: d.threadId, section: d.section, topic: d.topic, origin: d.origin === 'pushback' ? ('pushback' as const) : ('war' as const) })) },
       // Numbers an AI editor wrote that the facts didn't hold, in this revision or still in its text from an
       // earlier one: a notice on the page, for you only.
@@ -291,13 +330,23 @@ export class WikiService {
 
   // ── Live data ──────────────────────────────────────────────────────────
 
-  private data(db: Db, page: PageRow): WikiData {
-    const ctx = this.ctx(db)
-    const none: WikiData = { infobox: null, record: null, history: [], roster: null, recent: null }
+  private data(db: Db, folder: string, page: PageRow): WikiData {
+    const ctx = this.ctx(db, folder)
+    const none: WikiData = { infobox: null, record: null, history: [], roster: null, recent: null, relations: [], auto: {} }
     switch (page.kind) {
       case 'player': {
         const p = ctx.players.find((x) => x.id === page.refId)
-        return p ? { ...none, infobox: this.playerBox(ctx, p), record: this.playerRecord(db, ctx, p), history: this.playerHistory(db, ctx, p) } : none
+        if (!p) return none
+        const league = ctx.league()
+        const relations = relationsOf(league, p.id, ctx.titles.player)
+        return {
+          ...none,
+          infobox: this.playerBox(db, ctx, league, p, relations),
+          record: this.playerRecord(db, ctx, league, p),
+          history: this.playerHistory(db, ctx, p),
+          relations,
+          auto: this.playerAuto(ctx, league, p),
+        }
       }
       case 'team': {
         const t = ctx.teams.find((x) => x.id === page.refId)
@@ -314,46 +363,135 @@ export class WikiService {
 
   private teamName = (ctx: Ctx, id: string) => ctx.teams.find((t) => t.id === id)?.shortName ?? id
 
-  private playerBox(ctx: Ctx, p: PlayerRow): Infobox {
+  /**
+   * A player's box, as Namuwiki's: his school above his name in its colours;
+   * 소속, 포지션 (in Korean and bold, the slot's abbreviation once, "/
+   * 에이스" for the lineup's best), 신체 (cm first), 특기 (his ratings of A-
+   * and up), 라이벌 (public ties), 별명 and 수상, each only when there's
+   * something to say; then his 2K ratings in Korean, folded away.
+   */
+  private playerBox(db: Db, ctx: Ctx, league: League, p: PlayerRow, relations: WikiRelation[]): Infobox {
+    const { config } = ctx
     const team = ctx.teams.find((t) => t.id === p.teamId)
-    const slot = ctx.config.roster.slots.find((s) => s.id === p.slotId)?.name
-    const rows: Infobox['rows'] = [{ label: '소속', value: team?.shortName ?? '', link: team ? (ctx.titles.team.get(team.id) ?? null) : null }]
-    if (slot) rows.push({ label: '포지션', value: slot, link: null })
-    if (p.height) rows.push({ label: '키', value: p.height, link: null })
-    for (const c of ctx.config.ratings.columns) {
-      const v = p.ratings[c.id]
-      if (v !== null && v !== undefined && v !== '') rows.push({ label: c.name, value: String(v), link: null })
+    const rows: Infobox['rows'] = []
+    const add = (row: Infobox['rows'][number]) => void (row.value || row.swatches?.length ? rows.push(row) : 0)
+    add({ label: '소속', value: team?.name ?? '', link: team ? (ctx.titles.team.get(team.id) ?? null) : null })
+    add({ label: '포지션', value: positionLine(config, p.slotId, roleOf(config, ctx.players, p)), link: null, wiki: true })
+    add({ label: '신체', value: bodyText(p.heightCm, p.height, config.playerFields.heightUnit), link: null })
+    add({ label: '특기', value: specialties(ratedColumns(config, p.ratings, numberRanges(config, ctx.players))).map((x) => x.label).join(', '), link: null })
+    const rivals = relations.filter((r) => r.kind === 'rival' && !r.rumor).map((r) => (r.link ? (r.link === r.name ? `[[${r.name}]]` : `[[${r.link}|${r.name}]]`) : r.name))
+    add({ label: '라이벌', value: rivals.join(', '), link: null, wiki: true })
+    add({ label: '별명', value: p.nicknames.join(', '), link: null })
+    add({ label: '수상', value: this.awardsOf(db, ctx, p.id), link: null })
+    const has = (v: unknown) => v !== null && v !== undefined && v !== ''
+    // The overall first, then the rest as the sheet orders them.
+    const columns = [...config.ratings.columns.filter((c) => c.id === config.ratings.overallColumnId), ...config.ratings.columns.filter((c) => c.id !== config.ratings.overallColumnId)]
+    const ratings = columns.filter((c) => has(p.ratings[c.id])).map((c) => ({ label: ratingLabel(c), value: String(p.ratings[c.id]), grade: c.kind === 'grade', source: c.name }))
+    return { band: team?.shortName ?? null, title: p.name, subtitle: null, colors: schoolColors(league, team), rows, ratings: ratings.length ? { title: '능력치', rows: ratings } : null }
+  }
+
+  /** His awards for the infobox: season awards by season ("시즌 1 MVP"), weekly and monthly ones counted ("이주의 선수 3회"). */
+  private awardsOf(db: Db, ctx: Ctx, playerId: string): string {
+    const out: string[] = []
+    const counted = new Map<string, number>()
+    for (const [sid, label] of ctx.seasonLabels) {
+      for (const a of listAwards(db, sid)) {
+        if (a.playerId !== playerId) continue
+        const season = ctx.config.awards.season.find((x) => x.id === a.awardId)
+        if (season) out.push(`${label} ${season.name}${a.teamRank > 1 ? ` ${a.teamRank}팀` : ''}`)
+        else {
+          const name = ctx.config.awards.periodic.find((x) => x.id === a.awardId)?.name ?? a.awardId
+          counted.set(name, (counted.get(name) ?? 0) + 1)
+        }
+      }
     }
-    if (p.nicknames.length) rows.push({ label: '별명', value: p.nicknames.join(', '), link: null })
-    return { title: p.name, subtitle: team?.name ?? null, colors: team?.colors ?? [], rows }
+    for (const [name, n] of counted) out.push(n > 1 ? `${name} ${n}회` : name)
+    return out.join(', ')
   }
 
-  private statColumns(ctx: Ctx) {
-    return ctx.config.stats.columns.filter((c) => c.leader)
+  /** What a player page shows in its 개요 and 플레이 스타일 while nobody has written there (see AUTO_SECTIONS). */
+  private playerAuto(ctx: Ctx, league: League, p: PlayerRow): Record<string, string> {
+    const team = ctx.teams.find((t) => t.id === p.teamId)
+    const role = roleOf(ctx.config, ctx.players, p)
+    const slot = ctx.config.roster.slots.find((s) => s.id === p.slotId)
+    const position = positionOf(ctx.config, p.slotId)
+    const overview = autoOverview({
+      team: team ? { title: ctx.titles.team.get(team.id) ?? team.shortName, name: team.name, short: team.shortName } : null,
+      position,
+      starter: slot?.starter ?? true,
+      role,
+      nicknames: p.nicknames,
+      // 공개 only: never 소문 or 비밀.
+      lore: league.lore.player.get(p.id)?.sections.public ?? '',
+    })
+    const rated = ratedColumns(ctx.config, p.ratings, numberRanges(ctx.config, ctx.players))
+    const style = fallbackPlayStyle(rated, p.id, { school: team?.shortName ?? '', position, role })
+    return { ...(overview ? { [OVERVIEW]: overview } : {}), ...(style ? { [PLAY_STYLE]: style } : {}) }
   }
 
-  private playerRecord(db: Db, ctx: Ctx, p: PlayerRow): WikiTable {
-    const cols = this.statColumns(ctx)
+  /**
+   * 시즌별 활약: a row per season (his school, games, then 득점, 리바운드,
+   * 어시스트, 스틸 and 블록 a game, 야투율 and 3점 슛 성공률, as far as the
+   * league's box scores track them), and 통산 under them once there are two.
+   * A figure that led the league that season, or is his best season's, is in
+   * bold; the header is in his school's colours.
+   */
+  private playerRecord(db: Db, ctx: Ctx, league: League, p: PlayerRow): WikiTable {
+    const { config } = ctx
+    const cols = SEASON_STATS.flatMap((m) => config.stats.columns.filter((c) => c.meaning === m).slice(0, 1))
+    const splits = SEASON_SPLITS.flatMap((s) => {
+      const made = columnFor(config, s.made)
+      const tried = columnFor(config, s.tried)
+      return made && tried ? [{ key: s.key, label: s.label, made, tried }] : []
+    })
     const lines = db
       .prepare('SELECT g.season_id, b.team_id, b.stats FROM box_lines b JOIN games g ON g.id = b.game_id WHERE b.player_id = ? ORDER BY g.season_id')
       .all(p.id) as { season_id: number; team_id: string; stats: string }[]
-    const bySeason = new Map<number, { team: string; games: number; sums: number[] }>()
+    type Sums = { team: string; games: number; sums: number[]; shots: { made: number; tried: number }[] }
+    const blank = (team: string): Sums => ({ team, games: 0, sums: cols.map(() => 0), shots: splits.map(() => ({ made: 0, tried: 0 })) })
+    const bySeason = new Map<number, Sums>()
+    const all = blank('')
     for (const l of lines) {
-      const s = bySeason.get(l.season_id) ?? { team: l.team_id, games: 0, sums: cols.map(() => 0) }
+      const s = bySeason.get(l.season_id) ?? blank(l.team_id)
       const stats = JSON.parse(l.stats) as Record<string, number>
-      s.games++
+      for (const into of [s, all]) {
+        into.games++
+        cols.forEach((c, i) => (into.sums[i]! += stats[c.id] ?? 0))
+        splits.forEach((x, i) => {
+          into.shots[i]!.made += stats[x.made] ?? 0
+          into.shots[i]!.tried += stats[x.tried] ?? 0
+        })
+      }
       s.team = l.team_id
-      cols.forEach((c, i) => (s.sums[i]! += stats[c.id] ?? 0))
       bySeason.set(l.season_id, s)
     }
-    return {
-      columns: ['시즌', '소속', '경기', ...cols.map((c) => c.name)],
-      linkColumn: 1,
-      rows: [...bySeason].map(([sid, s]) => ({
-        cells: [ctx.seasonLabels.get(sid) ?? String(sid), this.teamName(ctx, s.team), String(s.games), ...s.sums.map((v) => (v / s.games).toFixed(1))],
-        link: ctx.titles.team.get(s.team) ?? null,
-      })),
+    // Per game, then the splits (a split with no attempts is no figure).
+    const figures = (s: Sums): (number | null)[] => [...s.sums.map((v) => v / s.games), ...s.shots.map((x) => (x.tried > 0 ? x.made / x.tried : null))]
+    const shown = (s: Sums) => figures(s).map((v, i) => (v === null ? '–' : i < cols.length ? v.toFixed(1) : `${(v * 100).toFixed(1)}%`))
+    // Who led the league in each figure, each season he played (by the leaders' own rules: half the most games played).
+    const keys = [...cols.map((c) => (c.leader ? c.id : null)), ...splits.map((x) => x.key)]
+    const led = (sid: number): Set<number> => {
+      const totals = seasonTotals(seasonBoxLines(db, sid))
+      const most = Math.max(0, ...[...totals.values()].map((t) => t.games))
+      const boards = leaders(config, totals, Math.max(1, Math.ceil(most / 2)), 1)
+      return new Set(keys.flatMap((key, i) => (key !== null && boards.find((b) => b.key === key)?.rows[0]?.playerId === p.id ? [i] : [])))
     }
+    const seasons = [...bySeason]
+    // His best season in each figure, once he has more than one.
+    const best = figures(blank('')).map((_, i) => (seasons.length > 1 ? Math.max(...seasons.map(([, s]) => figures(s)[i] ?? -1)) : null))
+    const rows: WikiTable['rows'] = seasons.map(([sid, s]) => {
+      const mine = figures(s)
+      const leading = led(sid)
+      const bold = mine.flatMap((v, i) => (v !== null && v > 0 && (leading.has(i) || v === best[i]) ? [3 + i] : []))
+      return {
+        cells: [ctx.seasonLabels.get(sid) ?? String(sid), this.teamName(ctx, s.team), String(s.games), ...shown(s)],
+        link: ctx.titles.team.get(s.team) ?? null,
+        ...(bold.length ? { bold } : {}),
+      }
+    })
+    if (seasons.length > 1) rows.push({ cells: ['통산', '', String(all.games), ...shown(all)], link: null, total: true })
+    const team = ctx.teams.find((t) => t.id === p.teamId)
+    return { columns: ['시즌', '소속', '경기', ...cols.map((c) => statLabel(c)), ...splits.map((x) => x.label)], linkColumn: 1, rows, colors: schoolColors(league, team) }
   }
 
   /** A player's season: trades, draft moves, going between the starters and the bench, awards and big games, oldest first. */
@@ -376,7 +514,7 @@ export class WikiService {
         // Only going between the starters and the bench: the position itself is in the infobox.
         const c = (x.changes as EventPayloads['slots_changed']['changes']).find((y) => y.playerId === p.id)
         const move = c ? rotationMove(ctx.config.roster, c.from, c.to) : null
-        const slot = (id: string | null) => ctx.config.roster.slots.find((s) => s.id === id)?.name ?? '–'
+        const slot = (id: string | null) => positionOf(ctx.config, id) || '–'
         if (c && move) out.push({ at: e.createdAt, season: season(e.seasonId), text: `${move === 'up' ? '주전 발탁' : '벤치로 이동'} (${slot(c.from)} → ${slot(c.to)})` })
       }
     }
@@ -396,20 +534,63 @@ export class WikiService {
     return out.sort((a, b) => a.at.localeCompare(b.at))
   }
 
+  /**
+   * A school's box, as Namuwiki's: "가람고등학교 농구부" in its colours; 소속
+   * (the league, conference and division), 팀 컬러 as swatches, 이번 시즌
+   * (record and place), 최고 성적 (its best playoff finish) and 라이벌, each
+   * only when there's something to say.
+   */
   private teamBox(db: Db, ctx: Ctx, t: Team): Infobox {
-    const division = ctx.config.structure.divisions.find((d) => d.id === t.divisionId)
-    const conference = ctx.config.structure.conferences.find((c) => c.id === division?.conferenceId)
+    const league = ctx.league()
     const view = standings(db)
     const rank = view.overall.findIndex((s) => s.teamId === t.id)
     const line = view.overall[rank]
+    const colors = schoolColors(league, t)
     const rows: Infobox['rows'] = []
-    if (conference) rows.push({ label: '컨퍼런스', value: conference.name, link: null })
-    if (division) rows.push({ label: '디비전', value: division.name, link: null })
-    if (line) rows.push({ label: '이번 시즌', value: `${line.wins}승 ${line.losses}패 (${rank + 1}위)`, link: ctx.titles.season })
-    rows.push({ label: '선수', value: `${ctx.players.filter((p) => p.teamId === t.id).length}명`, link: null })
-    return { title: t.shortName, subtitle: t.name === t.shortName ? null : t.name, colors: t.colors, rows }
+    const add = (row: Infobox['rows'][number]) => void (row.value || row.swatches?.length ? rows.push(row) : 0)
+    // "테스트 리그 동 컨퍼런스 · 북 디비전".
+    add({ label: '소속', value: [ctx.config.league.name, schoolPlace(ctx.config, t.divisionId).join(' · ')].filter(Boolean).join(' '), link: ctx.titles.league })
+    add({ label: '팀 컬러', value: '', link: null, swatches: colors })
+    if (line) add({ label: '이번 시즌', value: `${line.wins}승 ${line.losses}패 (${rank + 1}위)`, link: ctx.titles.season })
+    add({ label: '최고 성적', value: this.bestFinish(db, ctx, t.id), link: null })
+    const lore = league.lore.team.get(t.id)
+    const rivals = (lore?.kind === 'team' ? lore.settings.rivals : []).map((r) => {
+      const team = ctx.teams.find((x) => x.shortName === r)
+      return team ? `[[${ctx.titles.team.get(team.id) ?? team.shortName}]]` : r
+    })
+    add({ label: '라이벌', value: rivals.join(', '), link: null, wiki: true })
+    return { title: `${t.name} 농구부`, subtitle: null, colors, rows }
   }
 
+  /** How far a school went in a season's playoffs, as its season table says it, coloured; null when the season had none (yet). */
+  private playoffFinish(db: Db, seasonId: number, teamId: string): { text: string; tone: CellTone | null; rank: number } | null {
+    const view = playoffsView(db, seasonId)
+    if (!view.seeds && view.series.length === 0) return null
+    const mine = view.series.filter((s) => s.high === teamId || s.low === teamId)
+    if (mine.length === 0) return view.seeds ? { text: '탈락', tone: 'blue', rank: 0 } : null
+    if (mine.some((s) => s.winner === null)) return { text: '진행 중', tone: null, rank: 0 }
+    if (leagueChampion(view.series) === teamId) return { text: '우승', tone: 'gold', rank: 5 }
+    if (mine.some((s) => s.winner !== teamId && seriesTitle(view.series, s) === 'league')) return { text: '준우승', tone: 'silver', rank: 4 }
+    if (mine.some((s) => s.winner === teamId && seriesTitle(view.series, s) === 'group')) return { text: '컨퍼런스 우승', tone: 'orange', rank: 3 }
+    const deepest = mine.filter((s) => s.stage === 'playoffs').sort((a, b) => b.round - a.round)[0]
+    return deepest ? { text: `플레이오프 ${deepest.round}라운드`, tone: 'orange', rank: 1 + deepest.round / 100 } : { text: '플레이-인 탈락', tone: 'blue', rank: 0 }
+  }
+
+  /** A school's best playoff finish over its seasons ("시즌 1 우승"), the latest of equals; '' before it has made one. */
+  private bestFinish(db: Db, ctx: Ctx, teamId: string): string {
+    let best: { label: string; text: string; rank: number } | null = null
+    for (const [sid, label] of ctx.seasonLabels) {
+      const f = this.playoffFinish(db, sid, teamId)
+      if (f && f.rank > 0 && (!best || f.rank >= best.rank)) best = { label, text: f.text, rank: f.rank }
+    }
+    return best ? `${best.label} ${best.text}` : ''
+  }
+
+  /**
+   * 시즌별 성적: a row per season with its place ("2위/8팀"), how far it went
+   * in the playoffs (우승 gold, 준우승 silver, 진출 orange, 탈락 blue), and its
+   * regular-season record. The header is in the school's colours.
+   */
   private teamRecord(db: Db, ctx: Ctx, t: Team): WikiTable {
     const rows = db
       .prepare(
@@ -420,25 +601,42 @@ export class WikiService {
       )
       .all(t.id, t.id, t.id, t.id, t.id, t.id) as { season_id: number; w: number; l: number }[]
     return {
-      columns: ['시즌', '승', '패', '승률'],
+      columns: ['시즌', '순위', '플레이오프', '승', '패', '승률'],
       linkColumn: 0,
-      rows: rows.map((r) => ({ cells: [ctx.seasonLabels.get(r.season_id) ?? String(r.season_id), String(r.w), String(r.l), pct(r.w, r.l)], link: null })),
+      rows: rows.map((r) => {
+        const table = standings(db, r.season_id).overall
+        const at = table.findIndex((s) => s.teamId === t.id)
+        const finish = this.playoffFinish(db, r.season_id, t.id)
+        return {
+          cells: [ctx.seasonLabels.get(r.season_id) ?? String(r.season_id), at >= 0 ? `${at + 1}위/${table.length}팀` : '', finish?.text ?? '', String(r.w), String(r.l), pct(r.w, r.l)],
+          link: null,
+          ...(finish?.tone ? { tones: { 2: finish.tone } } : {}),
+        }
+      }),
+      colors: schoolColors(ctx.league(), t),
     }
   }
 
+  /** A school's roster: name, position, height (cm), then every rating column, the overall first, under its Korean name. */
   private roster(ctx: Ctx, t: Team): WikiTable {
-    const overall = ctx.config.ratings.overallColumnId
-    const slotOrder = (id: string | null) => ctx.config.roster.slots.findIndex((s) => s.id === id)
+    const { config } = ctx
+    const slotOrder = (id: string | null) => config.roster.slots.findIndex((s) => s.id === id)
+    const overall = config.ratings.columns.filter((c) => c.id === config.ratings.overallColumnId)
+    const ratings = [...overall, ...config.ratings.columns.filter((c) => c.id !== config.ratings.overallColumnId)]
+    const shown = (label: string, source: string) => (label === source ? null : source)
     return {
-      columns: ['이름', '포지션', ...(overall ? [ctx.config.ratings.columns.find((c) => c.id === overall)?.name ?? 'OVR'] : [])],
+      columns: ['이름', '포지션', '신장', ...ratings.map((c) => ratingShort(c))],
       linkColumn: 0,
       rows: ctx.players
         .filter((p) => p.teamId === t.id)
         .sort((a, b) => slotOrder(a.slotId) - slotOrder(b.slotId))
         .map((p) => ({
-          cells: [p.name, ctx.config.roster.slots.find((s) => s.id === p.slotId)?.name ?? '', ...(overall ? [String(p.ratings[overall] ?? '')] : [])],
+          cells: [p.name, positionOf(config, p.slotId), heightCm(p.heightCm, p.height), ...ratings.map((c) => String(p.ratings[c.id] ?? ''))],
           link: ctx.titles.player.get(p.id) ?? null,
         })),
+      grades: ratings.flatMap((c, i) => (c.kind === 'grade' ? [3 + i] : [])),
+      hints: [null, null, null, ...ratings.map((c) => shown(ratingShort(c), c.name))],
+      colors: schoolColors(ctx.league(), t),
     }
   }
 
@@ -457,7 +655,7 @@ export class WikiService {
         const them = home ? g.away_score : g.home_score
         const vs = home ? g.away_id : g.home_id
         return {
-          cells: [g.stage === 'regular' ? roundLabel(ctx.config, g.round) : `${STAGES[g.stage] ?? g.stage} ${g.round}차전`, `${home ? 'vs' : '@'} ${this.teamName(ctx, vs)}`, `${us > them ? '승' : '패'} ${us}:${them}`],
+          cells: [g.stage === 'regular' ? roundLabel(ctx.config, g.round, 'long') : `${STAGES[g.stage] ?? g.stage} ${g.round}차전`, `${home ? 'vs' : '@'} ${this.teamName(ctx, vs)}`, `${us > them ? '승' : '패'} ${us}:${them}`],
           link: ctx.titles.team.get(vs) ?? null,
         }
       }),

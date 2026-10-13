@@ -1,6 +1,7 @@
 import { rng, shuffle } from '@core/random'
 import { leaders, seasonTotals } from '@core/stats'
 import { DEFAULT_TOPIC_MIX, TOPIC_KINDS, type TopicKind } from '@shared/config/schema'
+import { leaderLabel } from '@shared/labels'
 import { playedMode, roundLabel } from '@shared/played'
 import { currentSeason, listPlayers, listTeams } from '@data/league'
 import { listGames, seasonBoxLines, standings } from '@data/season'
@@ -472,7 +473,7 @@ const MAKERS: Record<TopicKind, Maker> = {
         kind: 'stats',
         board: 'main',
         tag: '분석',
-        brief: `분석러가 쓰는 기록 글: ${board.label} 상위권을 보고 해석한다(누가 거품인지, 누가 진짜인지). 숫자는 아래 그대로만 쓴다.`,
+        brief: `분석러가 쓰는 기록 글: ${leaderLabel(c.league.config, board)} 상위권을 보고 해석한다(누가 거품인지, 누가 진짜인지). 숫자는 아래 그대로만 쓴다.`,
         // A per-game average comes with its total, so "4경기에서 95개" needs no arithmetic the check can't vouch for.
         facts: board.rows.map(
           (r, i) =>

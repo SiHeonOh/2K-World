@@ -10,20 +10,69 @@ export interface WikiAuthor {
   kind: 'system' | 'user' | 'fan' | 'reporter'
 }
 
+/** One row of an infobox. Rows without a value aren't sent. */
+export interface InfoboxRow {
+  label: string
+  value: string
+  link: string | null
+  /** The value is namumark (a bold position, links to rivals), drawn as the page draws its text. */
+  wiki?: boolean
+  /** Colour swatches after the value (a school's 팀 컬러). */
+  swatches?: string[]
+}
+
 /** The box at the top right, filled from the league data (never from the page text). */
 export interface Infobox {
+  /** A band above the title, in the school's colours: a player's school, as Namuwiki's "팀 No. 번호" bar. */
+  band?: string | null
   title: string
   subtitle: string | null
+  /** The school's colours (its lore's, else 리그 설정's): the header's background, then its text. */
   colors: string[]
-  rows: { label: string; value: string; link: string | null }[]
+  rows: InfoboxRow[]
+  /**
+   * A player's 2K ratings in Korean, folded away until opened ("[ 능력치
+   * 펼치기 · 접기 ]": Namuwiki never shows a rating table openly): the overall
+   * and every rating column, grades coloured by the league's scale. `source`
+   * is the column's own name, a hover hint when the label translates it.
+   */
+  ratings?: { title: string; rows: { label: string; value: string; grade: boolean; source: string }[] } | null
 }
+
+/** How a playoff cell is coloured in a school's season table: 우승 gold, 준우승 silver, 진출 orange, 탈락 blue. */
+export type CellTone = 'gold' | 'silver' | 'orange' | 'blue'
 
 /** A table the screen draws for a macro such as [기록]. */
 export interface WikiTable {
   columns: string[]
   /** Which column shows the row's link. */
   linkColumn: number
-  rows: { cells: string[]; link: string | null }[]
+  /**
+   * `bold`: cells to set in bold (a league-leading figure, a career high);
+   * `total`: the 통산 row (pale yellow); `tones`: coloured cells, by column.
+   */
+  rows: { cells: string[]; link: string | null; bold?: number[]; total?: boolean; tones?: Record<number, CellTone> }[]
+  /** Columns whose cells are grades (coloured by the league's scale). */
+  grades?: number[]
+  /** A header's hover hint (a rating column's own name), by column. */
+  hints?: (string | null)[]
+  /** The header row in these colours (a school's), as Namuwiki's tables have it. */
+  colors?: string[]
+}
+
+/** One line of [인간관계]: a tie from the player's lore (or the other player's), public or rumoured, never secret. */
+export interface WikiRelation {
+  name: string
+  /** The other player's page, when he has one. */
+  link: string | null
+  /** His school, when he's a player of this league. */
+  team: string | null
+  /** The kind of tie, as lore has it: friend, rival, family, mentor, dislikes. */
+  kind: string
+  /** As the page says it: 절친, 숙적, or "라이벌이라는 소문이 있다" for a rumour. */
+  text: string
+  /** Only rumoured (소문). */
+  rumor: boolean
 }
 
 export interface HistoryItem {
@@ -43,6 +92,44 @@ export interface WikiData {
   roster: WikiTable | null
   /** [최근경기]: recent games. */
   recent: WikiTable | null
+  /** [인간관계]: a player's ties, as his and other players' lore have them (public or rumoured, never secret). */
+  relations: WikiRelation[]
+  /**
+   * Text the app writes for a section while it has none of its own, by the
+   * section's title (namumark): a player's 개요 and 플레이 스타일. Never
+   * stored, so it follows the league, and it's no one's edit.
+   */
+  auto: Record<string, string>
+}
+
+/** Whether one of the app's macros has anything to show (an empty one leaves its section out of the page). */
+export function macroFilled(data: WikiData, name: string): boolean {
+  switch (name) {
+    case '기록':
+      return (data.record?.rows.length ?? 0) > 0
+    case '정보':
+      return (data.roster?.rows.length ?? 0) > 0
+    case '최근경기':
+      return (data.recent?.rows.length ?? 0) > 0
+    case '역사':
+      return data.history.length > 0
+    case '인간관계':
+      return data.relations.length > 0
+    default:
+      return false
+  }
+}
+
+/** 선수 문서 다듬기: players whose pages still show the app's own 플레이 스타일 (or one written from ratings or lore that changed), and the jobs they'd take. */
+export interface PlayerPagesPlan {
+  players: number
+  jobs: number
+}
+
+/** Player-page jobs still in the queue. */
+export interface PlayerPagesStatus {
+  waiting: number
+  running: number
 }
 
 export interface WikiPageView {

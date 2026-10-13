@@ -189,6 +189,59 @@
   padding: 6px 8px;
   border-top: 1px solid var(--wk-line);
 }
+/* A player's school above his name, as Namuwiki's "팀 No. 번호" bar. */
+.wk-infobox thead th.wk-infobox-band {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+}
+/* 팀 컬러 */
+.wk-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin: 0 4px -2px 0;
+  border: 1px solid var(--wk-line);
+  border-radius: 2px;
+}
+/* The 2K ratings, folded away until opened, then a compact two-column grid. */
+.wk-infobox td.wk-ratings-cell {
+  padding: 4px 6px;
+}
+.wk-ratings-fold summary {
+  cursor: pointer;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.wk-ratings-fold[open] summary {
+  margin-bottom: 6px;
+}
+.wk-ratings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+.wk-rating {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.wk-rating-name {
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wk-rating-num {
+  min-width: 30px;
+  text-align: center;
+}
 .wk-body {
   line-height: 1.75;
   font-size: 15px;
@@ -264,6 +317,10 @@
   color: var(--wk-link);
   text-decoration: none;
 }
+.wk-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
 .wk-table {
   border-collapse: collapse;
   margin: 8px 0;
@@ -276,6 +333,53 @@
 }
 .wk-table th {
   background: var(--surface-2);
+  word-break: keep-all;
+}
+.wk-table td.center {
+  text-align: center;
+}
+/* 통산 under a player's seasons. */
+.wk-table tr.wk-total td {
+  background: #fff8d6;
+  font-weight: 600;
+}
+/* A school's playoff finish: 우승 gold, 준우승 silver, 진출 orange, 탈락 blue. */
+.wk-table td.wk-tone.gold {
+  background: #f6dc7c;
+}
+.wk-table td.wk-tone.silver {
+  background: #dde1e6;
+}
+.wk-table td.wk-tone.orange {
+  background: #fbd3a6;
+}
+.wk-table td.wk-tone.blue {
+  background: #cfe0f5;
+}
+/* The app's own text in an empty 개요 or 플레이 스타일: reads like the rest of the page. */
+.wk-auto p {
+  margin: 6px 0;
+}
+.wk-relations {
+  padding-left: 18px;
+}
+.wk-relations li {
+  margin: 2px 0;
+}
+.wk-rel-team {
+  color: var(--text-3);
+  font-size: 13px;
+  margin-left: 4px;
+}
+.wk-rel-text::before {
+  content: '— ';
+  color: var(--text-3);
+  margin-left: 6px;
+}
+/* A rumoured tie reads as one ("…라는 소문이 있다"), set a little apart. */
+.wk-relations li.wk-rumor .wk-rel-text {
+  color: var(--text-2);
+  font-style: italic;
 }
 .wk-body blockquote {
   border-left: 4px solid var(--wk-main);

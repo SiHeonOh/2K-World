@@ -5,7 +5,7 @@
  * ` * ` and ` 1. ` lists (indent nests), `|| a || b ||` tables (`||||a||` and a
  * `<-2>` cell attribute span columns), `> ` quotes, `----`,
  * `{{{#!folding 제목` … `}}}`, `{{{` code `}}}`, `[목차]`, `[각주]`, and app macros
- * like `[기록]` that the screen fills from the league data.
+ * like `[기록]` and `[인간관계]` that the screen fills from the league data.
  * Inline: `'''bold'''`, `''italic''`, `__underline__`, `~~strike~~` / `--strike--`,
  * `[[문서]]`, `[[문서|보이는 글]]`, `[[문서#s-1]]`, `[* 각주]`, `{{{#red 글}}}` /
  * `{{{#ff0000 글}}}`, `{{{+1 크게}}}`, `{{{-1 작게}}}`, `[br]`, and `[[분류:이름]]`
@@ -55,7 +55,7 @@ export interface WikiDoc {
 }
 
 const COLORS = new Set(['red', 'blue', 'green', 'orange', 'purple', 'gray', 'grey', 'black', 'white', 'brown', 'pink', 'navy', 'gold', 'silver'])
-const MACROS = new Set(['목차', 'tableofcontents', '각주', 'footnote', '기록', '역사', '정보', '최근경기'])
+const MACROS = new Set(['목차', 'tableofcontents', '각주', 'footnote', '기록', '역사', '정보', '최근경기', '인간관계'])
 
 /** Inline markup nested deeper than this is left as text. */
 const MAX_INLINE_DEPTH = 20
@@ -321,6 +321,68 @@ function numberHeadings(heads: HeadingBlock[]): Heading[] {
     h.id = id
     return { level: h.level, num, id, title: plain(h.text) }
   })
+}
+
+/** Macros that only point elsewhere (the 목차, the footnotes): never what a section has to say. */
+const NAVIGATION = new Set(['목차', '각주'])
+
+/**
+ * The page as a reader sees it. A section with nothing to show is left out,
+ * heading and all, as Namuwiki pages have no empty sections, and the headings
+ * left are numbered again, so the 목차 has no gaps. A section has something
+ * to show when it has text of its own, a macro with data (`filled`, by macro
+ * name), text the app writes for it while it's empty (`auto`, by title; an
+ * `[auto]` macro carrying the title goes right under its heading), or a
+ * subsection with something. [목차] and [각주] don't count, and footnotes
+ * whose [각주] went with an empty section show at the page's end. Editors
+ * still see every section in the source.
+ */
+export function shownPage(doc: WikiDoc, filled: (macro: string) => boolean, auto: (title: string) => boolean = () => false): { blocks: Block[]; headings: Heading[] } {
+  const blocks = doc.blocks
+  // Each heading's own blocks run to the next heading; its section, to the next one at its level or above.
+  const heads = blocks.flatMap((b, i) => (b.t === 'h' ? [i] : []))
+  const own = (at: number) => {
+    const next = heads.find((h) => h > at) ?? blocks.length
+    return blocks.slice(at + 1, next)
+  }
+  const says = (b: Block) => b.t !== 'h' && b.t !== 'hr' && !(b.t === 'macro' && (NAVIGATION.has(b.name) || !filled(b.name)))
+  const titleAt = (at: number) => plain((blocks[at] as HeadingBlock).text)
+  // The text the app writes goes to the first section of each title.
+  const firsts = new Set<number>()
+  const titles = new Set<string>()
+  for (const at of heads) {
+    if (titles.has(titleAt(at))) continue
+    titles.add(titleAt(at))
+    firsts.add(at)
+  }
+  const autoAt = new Set<number>()
+  const keep = new Map<number, boolean>()
+  // Deepest first, so a section knows whether its subsections have something.
+  for (const at of [...heads].reverse()) {
+    const level = (blocks[at] as HeadingBlock).level
+    const end = heads.find((x) => x > at && (blocks[x] as HeadingBlock).level <= level) ?? blocks.length
+    const text = own(at).some(says)
+    const fill = !text && firsts.has(at) && auto(titleAt(at))
+    if (fill) autoAt.add(at)
+    keep.set(at, text || fill || heads.some((x) => x > at && x < end && keep.get(x)))
+  }
+  const out: Block[] = []
+  const shownHeads: HeadingBlock[] = []
+  let hidden = false
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]!
+    if (b.t === 'h') {
+      hidden = !keep.get(i)
+      if (hidden) continue
+      const copy: HeadingBlock = { ...b }
+      shownHeads.push(copy)
+      out.push(copy)
+      if (autoAt.has(i)) out.push({ t: 'macro', name: 'auto', arg: plain(b.text) })
+      continue
+    }
+    if (!hidden) out.push(b)
+  }
+  return { blocks: out, headings: numberHeadings(shownHeads) }
 }
 
 function parseBlocks(lines: string[], st: State, depth: number): Block[] {

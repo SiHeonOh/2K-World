@@ -272,6 +272,11 @@ export class JobQueue {
     void this.kick()
   }
 
+  /** Whether this queue runs jobs of a kind at all (a queue made for a test may not have been given it). */
+  knows(kind: string): boolean {
+    return this.kinds.has(kind)
+  }
+
   /** Whether a failed job of this kind can be queued again at all (its own row may still say no). */
   canRetry(kind: string): boolean {
     const k = this.kinds.get(kind)

@@ -64,6 +64,12 @@ export const gradeStepSchema = z.object({
 const ratingBase = {
   id: idSchema,
   name: nameSchema,
+  /**
+   * The Korean name shown for it (위키, tables, AI writers); left out or
+   * blank, a dictionary of 2K's names translates it (shared/labels.ts).
+   * Display only, so it can change any time; added without a version bump.
+   */
+  label: z.string().trim().max(20).optional(),
   /** Weight of this column in the player value model; 0 = display only. */
   weight: z.number().min(0).max(100),
 }
@@ -302,7 +308,24 @@ export const modelSchema = z.enum(['haiku', 'sonnet', 'opus', 'fable'])
 export const effortSchema = z.enum(['default', 'low', 'medium', 'high', 'xhigh', 'max'])
 
 /** Every AI job the app runs, each with its own model and effort (편집실 → AI 모델). */
-export const AI_JOBS = ['gameThread', 'article', 'reply', 'live', 'chatter', 'wiki', 'wikiTalk', 'wikiWar', 'player', 'loreDraft', 'loreSweep', 'gmIntent', 'gmRespond', 'gmDraft', 'screenshot'] as const
+export const AI_JOBS = [
+  'gameThread',
+  'article',
+  'reply',
+  'live',
+  'chatter',
+  'wiki',
+  'wikiTalk',
+  'wikiWar',
+  'wikiPlayer',
+  'player',
+  'loreDraft',
+  'loreSweep',
+  'gmIntent',
+  'gmRespond',
+  'gmDraft',
+  'screenshot',
+] as const
 export type AiJob = (typeof AI_JOBS)[number]
 
 /** Replies and live comments are quick (Haiku); everything else writes with Sonnet. Effort is Claude Code's own default. */
@@ -315,6 +338,7 @@ export const DEFAULT_AI_MODELS: Record<AiJob, z.infer<typeof modelSchema>> = {
   wiki: 'sonnet',
   wikiTalk: 'sonnet',
   wikiWar: 'sonnet',
+  wikiPlayer: 'sonnet',
   player: 'sonnet',
   loreDraft: 'sonnet',
   loreSweep: 'sonnet',
@@ -335,8 +359,8 @@ export const defaultAiJobs = () =>
     { model: z.infer<typeof modelSchema>; effort: z.infer<typeof effortSchema> }
   >
 
-/** Jobs added after a league was made start from the job they grew out of (the wiki's 토론 and wars from 위키 편집). */
-const BORROWS: Partial<Record<AiJob, AiJob>> = { wikiTalk: 'wiki', wikiWar: 'wiki' }
+/** Jobs added after a league was made start from the job they grew out of (the wiki's 토론, wars and player pages from 위키 편집). */
+const BORROWS: Partial<Record<AiJob, AiJob>> = { wikiTalk: 'wiki', wikiWar: 'wiki', wikiPlayer: 'wiki' }
 
 export const aiConfigSchema = z.preprocess(
   (raw) => {

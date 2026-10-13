@@ -2,8 +2,10 @@
 // follows a link to a school (live infobox and roster), edits a page with a
 // new red link, checks history and 비교, reverts, finds it in 최근 변경 and
 // search, creates the missing page, opens a 토론 that the (demo) editors
-// answer, closes and reopens it, and sets edit wars in 편집실. Run
-// `npm run build` first.
+// answer, closes and reopens it, reads a player page in Korean (infobox,
+// the app's own 플레이 스타일, no empty sections), sets edit wars in 편집실
+// and has the (demo) editors write the player pages with 선수 문서 다듬기.
+// Run `npm run build` first.
 import { _electron as electron } from 'playwright-core'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -174,12 +176,73 @@ await step('a revision with a number its facts didn’t hold shows a notice and 
   await shot('wk05b-number-mark')
 })
 
+let player = ''
+await step('a player page reads in Korean: a Namuwiki infobox, folded ratings, the app’s 개요 and 플레이 스타일, no empty 역사', async () => {
+  await page.fill('.wk-search input', school)
+  await page.click('.wk-search button')
+  await page.waitForSelector(`.wk-head h1:has-text("${school}")`)
+  // The school's box (its 농구부, where it plays) and roster: Korean positions and heights in cm.
+  const schoolBox = await page.locator('.wk-infobox').innerText()
+  if (!schoolBox.includes('농구부') || !schoolBox.includes('소속')) throw new Error(`school infobox: ${schoolBox.slice(0, 200)}`)
+  const roster = await page.locator('.wk-table').first().innerText()
+  if (!/센터|포워드|가드/.test(roster) || !/\d{3}cm/.test(roster)) throw new Error(`roster not in Korean: ${roster.slice(0, 200)}`)
+  const link = page.locator('.wk-table .wk-link').first()
+  player = (await link.innerText()).trim()
+  await link.click()
+  await page.waitForSelector(`.wk-head h1:has-text("${player}")`)
+  await page.waitForSelector('.wk-infobox th:has-text("포지션")')
+  const box = await page.locator('.wk-infobox').innerText()
+  for (const label of ['소속', '포지션', '신체', '능력치 펼치기']) if (!box.includes(label)) throw new Error(`no ${label} in the infobox`)
+  // The position in Korean, its abbreviation once; the height in cm first; no 2K names.
+  if (!/(포인트 가드|슈팅 가드|스몰 포워드|파워 포워드|센터)\((PG|SG|SF|PF|C)\)/.test(box)) throw new Error(`position not in Korean: ${box}`)
+  if (!/\d{3}cm/.test(box)) throw new Error(`no height in cm: ${box}`)
+  if (/Athleticism|OVR/.test(box)) throw new Error(`English left in the infobox: ${box}`)
+  // The ratings stay folded until opened; the overall is 종합.
+  const fold = page.locator('.wk-infobox details.wk-ratings-fold')
+  if (await fold.evaluate((d) => d.open)) throw new Error('the ratings start unfolded')
+  await fold.locator('summary').click()
+  await page.waitForSelector('.wk-ratings-fold[open] .wk-rating-name:text-is("종합")')
+  // No games yet: 개요 and 플레이 스타일 show the app's own text, and the empty 역사 is left out of the page and its 목차.
+  await page.waitForSelector('.wk-h:has-text("플레이 스타일")')
+  if ((await page.locator('.wk-auto').count()) < 2) throw new Error('the app’s 개요 and 플레이 스타일 aren’t both there')
+  if (!(await page.locator('.wk-auto').first().innerText()).includes('농구부 소속의')) throw new Error('the app’s 개요 doesn’t open like Namuwiki’s')
+  if (await page.locator('.wk-h:has-text("역사")').count()) throw new Error('an empty 역사 section shows')
+  if (await page.locator('.wk-toc:has-text("역사")').count()) throw new Error('the 목차 lists an empty 역사')
+  if (await page.locator('.wk-body:has-text("OVR")').count()) throw new Error('an English rating name on the page')
+  await shot('wk07-player')
+  // 편집 still has every section, for anyone to fill.
+  await page.click('.wk-tools button:has-text("편집")')
+  const source = await page.inputValue('.wk-editor')
+  if (!source.includes('== 역사 ==') || !source.includes('== 플레이 스타일 ==')) throw new Error('the source lost its sections')
+  await page.click('.wk-save button:has-text("취소")')
+  await page.waitForSelector('.wk-infobox')
+})
+
 await step('편집실 → 위키: edit wars set to 자주', async () => {
   await page.click('.nav a:has-text("편집실")')
   await page.click('[role="radiogroup"][aria-label="편집 분쟁"] button:has-text("자주")')
   await page.click('.card:has(h2:has-text("위키")) button:has-text("저장")')
   await page.waitForSelector('.card:has(h2:has-text("위키")) .notice:has-text("저장했어요")')
   await shot('wk06-settings')
+})
+
+await step('편집실 → 위키: 선수 문서 다듬기 has the (demo) editors write the player pages', async () => {
+  // The confirm (how many jobs, on which AI 모델 setting) is accepted by the dialog handler.
+  await page.click('.card:has(h2:has-text("위키")) button:has-text("선수 문서 다듬기")')
+  await page.waitForSelector('.card:has(h2:has-text("위키")) .notice:has-text("맡겼어요")')
+  // The demo jobs answer at once; the waiting count goes once they're done.
+  await page.waitForFunction(() => !document.querySelector('.wk-polish .spin'), null, { timeout: 60_000 })
+  await shot('wk08-polish')
+  await page.click('.nav a:has-text("위키")')
+  await page.fill('.wk-search input', player)
+  await page.click('.wk-search button')
+  await page.waitForSelector(`.wk-head h1:has-text("${player}")`)
+  // The editors' 개요 and 플레이 스타일 replace the app's text, as an editor's revision in 역사.
+  await page.waitForSelector('.wk-body:has-text("성실함이 장점으로 꼽힌다")')
+  if (await page.locator('.wk-auto').count()) throw new Error('the app’s own text still shows')
+  await page.click('.wk-tools button:has-text("역사")')
+  await page.waitForSelector('.wk-revs td:has-text("플레이 스타일 서술")')
+  await shot('wk09-player-written')
 })
 
 const errors = logs.filter((l) => l.startsWith('[pageerror]') || l.startsWith('[error]'))

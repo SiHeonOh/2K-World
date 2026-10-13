@@ -34,7 +34,18 @@ import type {
   WriteCommentInput,
   WritePostInput,
 } from './community'
-import type { WikiDiffView, WikiPageView, WikiRevisionView, WikiSaveInput, WikiSearchResult, WikiThreadInput, WikiThreadSummary, WikiThreadView } from './wiki'
+import type {
+  PlayerPagesPlan,
+  PlayerPagesStatus,
+  WikiDiffView,
+  WikiPageView,
+  WikiRevisionView,
+  WikiSaveInput,
+  WikiSearchResult,
+  WikiThreadInput,
+  WikiThreadSummary,
+  WikiThreadView,
+} from './wiki'
 import type { LockerRoomView, PlayerStateView } from './mood'
 import type { PlayerEdit, RosterSaveResult } from './roster'
 import type { LoreCreateTarget, LoreDocView, LoreIndexView, LoreSaveInput, LoreSaveResult, LoreTableView } from './lore'
@@ -330,6 +341,12 @@ export interface Api {
   'wiki.comment': (slug: string, threadId: number, body: string) => { n: number }
   'wiki.setThread': (slug: string, threadId: number, open: boolean, note: string) => { ok: true }
   'wiki.saveSettings': (slug: string, wiki: LeagueConfig['wiki']) => { version: number }
+  /** 선수 문서 다듬기, counted: the player pages that want their 플레이 스타일 written, and the jobs they'd take. */
+  'wiki.playerPagesPlan': (slug: string) => PlayerPagesPlan
+  /** 선수 문서 다듬기: queues those jobs (about six players of a school each, below chatter); says how many. */
+  'wiki.polishPlayerPages': (slug: string) => PlayerPagesPlan
+  /** Player-page jobs waiting or running. */
+  'wiki.playerPagesStatus': (slug: string) => PlayerPagesStatus
 
   // Player minds (Phase 5)
   'mood.team': (slug: string, teamId: string) => LockerRoomView
@@ -479,6 +496,9 @@ export const API_CHANNELS = [
   'wiki.comment',
   'wiki.setThread',
   'wiki.saveSettings',
+  'wiki.playerPagesPlan',
+  'wiki.polishPlayerPages',
+  'wiki.playerPagesStatus',
   'mood.team',
   'mood.player',
 ] as const satisfies readonly ApiChannel[]

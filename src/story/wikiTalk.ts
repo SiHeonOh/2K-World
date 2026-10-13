@@ -2,13 +2,12 @@ import { z } from 'zod'
 import type { JobKind, JobRow } from '@ai/queue'
 import { aiFor, type EffortLevel, type LeagueConfig, type ModelName, type WikiConfig } from '@shared/config/schema'
 import { diffSeq } from '@shared/diff'
-import { splitWikiSections } from '@shared/namumark'
 import { tagUnverified, untag } from '@shared/numbers'
 import { lastEventId, listPersonas, remember, type PersonaRow } from '@data/community'
 import { jsonField, transaction, type Db } from '@data/db'
 import { currentSeason, loadConfig } from '@data/league'
 import { addTalk, closeThread, commentCount, DISPUTE_ROUNDS, openDisputes, openThread, sectionReverted, talkLines, threadById, type ThreadRow } from '@data/talk'
-import { ownedSections, pageById, pageFlags, revisionBody, saveRevision, sectionAuthors, sectionHistory, sectionKeys, TRAILER_LINE, type PageRow } from '@data/wiki'
+import { ownedSections, pageById, pageFlags, revisionBody, saveRevision, sectionAuthors, sectionHistory, sectionKeys, setSectionText, type PageRow } from '@data/wiki'
 import { castBlock, join2, loreFor, pickCast, said, type League } from './context'
 import { numberGate, NumbersRedo, readFacts, withRetryNote } from './numbers'
 import { ensureSeasonSection, guardedEdit, MACRO_LINE, pageOutline, quoteBlock, safeEditText, SEASON_PARENTS, sectionBody, seasonBlock, SHOWN_SEASON, STYLE } from './wikiEdits'
@@ -70,42 +69,8 @@ export function disputedPart(before: string, after: string): { head: string[]; b
   return { head: a.slice(0, s), before: a.slice(s, a.length - e), after: b.slice(s, b.length - e), tail: a.slice(a.length - e) }
 }
 
-/**
- * Sets one section's own text (by key, see sectionKeys), keeping its heading
- * and its [각주]/분류 lines, which go after the new text. Null when the page
- * has no such section.
- */
-export function setSectionText(body: string, key: string, text: string): string | null {
-  const sections = splitWikiSections(body)
-  const seen = new Map<string, number>()
-  for (let i = 0; i < sections.length; i++) {
-    const s = sections[i]!
-    const title = s.title ?? ''
-    const n = (seen.get(title) ?? 0) + 1
-    seen.set(title, n)
-    if (`${title}#${n}` !== key) continue
-    const lines = s.text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n')
-    const head = s.title === null ? [] : [lines[0]!]
-    const body = s.title === null ? lines : lines.slice(1)
-    // The blank lines before the next heading stay, and so do those between the text and its closing
-    // [각주]/분류 lines, so a diff shows only the text that changed.
-    let blanks = 0
-    while (blanks < body.length && body[body.length - 1 - blanks]!.trim() === '') blanks++
-    const rest = body.slice(0, body.length - blanks)
-    const trailer = rest.filter((l) => TRAILER_LINE.test(l))
-    const first = rest.findIndex((l) => TRAILER_LINE.test(l))
-    let gap = 0
-    while (first > 0 && gap < first && rest[first - 1 - gap]!.trim() === '') gap++
-    const own = text.replace(/\r\n?/g, '\n').replace(/\s+$/, '')
-    const lines2 = own ? own.split('\n') : []
-    const next = [...head, ...lines2, ...Array<string>(trailer.length && lines2.length ? gap : 0).fill(''), ...trailer]
-    const ends = s.text.endsWith('\n') || i < sections.length - 1
-    // An emptied preamble leaves nothing behind (not even a blank line).
-    sections[i] = { ...s, text: next.length === 0 ? '' : [...next, ...Array<string>(blanks).fill('')].join('\n') + (ends ? '\n' : '') }
-    return sections.map((x) => x.text).join('')
-  }
-  return null
-}
+// Setting one section's text lives with the other section helpers (the wiki's own layout upgrade uses it too).
+export { setSectionText }
 
 /** How many characters it takes to turn one text into the other (a long rewrite counts as all of both). */
 export function changedChars(a: string, b: string): number {

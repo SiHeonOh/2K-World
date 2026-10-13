@@ -13,6 +13,7 @@ import { WikiService } from './wiki'
 import { STORY_PRIORITY, storyDemo, storyKinds } from '@story/jobs'
 import { WIKI_EDITS, WIKI_RETRY_PRIORITY, wikiEditDemo, wikiEditKind } from '@story/wikiEdits'
 import { TALK_PRIORITY, WAR_PRIORITY, WIKI_TALK_KINDS, WIKI_WAR, wikiTalkDemo, wikiTalkKinds } from '@story/wikiTalk'
+import { WIKI_PLAYER, WIKI_PLAYER_PRIORITY, wikiPlayerDemo, wikiPlayerKind } from '@story/wikiPlayer'
 import { loreDemo, loreKinds } from '@story/loreJobs'
 import { revealDemo, revealKind } from '@story/reveals'
 import { SuggestionService } from './suggestions'
@@ -43,7 +44,7 @@ export interface AppContext {
 /** The screen a finished job's results show up on. */
 export function pushTopic(kind: string): PushTopic {
   if (['post_game_thread', 'event_thread', 'reply_to_user', 'live_comments', 'chatter_batch', 'player_reaction'].includes(kind)) return 'community'
-  if (kind === 'wiki_edits' || WIKI_TALK_KINDS.includes(kind)) return 'wiki'
+  if (kind === 'wiki_edits' || kind === WIKI_PLAYER || WIKI_TALK_KINDS.includes(kind)) return 'wiki'
   if (kind.startsWith('gm_')) return 'gm'
   if (kind.startsWith('lore_')) return 'inbox'
   if (kind === 'read_box_score') return 'gameday'
@@ -79,6 +80,15 @@ export function createContext(dataDir: string, defaultsDir: string, appVersion: 
       }),
     ],
     wikiEditDemo,
+  )
+  // Player pages' 플레이 스타일 and 개요, written up by the same editors with the same guide.
+  ai.addKinds(
+    (db, folder, slug) => [
+      wikiPlayerKind(db, () => loadPrompt('wiki', folder, defaultsDir), {
+        requeue: (input) => void ai.queueFor(slug, db, folder).enqueue(WIKI_PLAYER, input, WIKI_PLAYER_PRIORITY),
+      }),
+    ],
+    wikiPlayerDemo,
   )
   ai.addKinds(
     (db, folder, slug) =>

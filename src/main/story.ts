@@ -21,7 +21,7 @@ import { closeDuePolls, closeRoundPolls, votePoll } from '@data/polls'
 import { appendEvent, currentSeason, listEventsAfter, listPlayers, listTeams, loadConfig, updateConfig } from '@data/league'
 import { cancelQueuedForGame } from '@data/jobs'
 import type { CommunityConfig, LeagueConfig } from '@shared/config/schema'
-import { syncSchoolCategories } from '@story/wiki'
+import { seedWiki, syncSchoolCategories, upgradeWiki } from '@story/wiki'
 import { refuse } from '@data/rules'
 import {
   chatterInput,
@@ -37,7 +37,9 @@ import {
   roundUpInput,
   type League,
 } from '@story/context'
-import { roundWikiInput, WIKI_EDITS, WIKI_PRIORITY, wikiEditInput, type ContestedEdit, type WikiEditInput } from '@story/wikiEdits'
+import { roundTop, roundWikiInput, WIKI_EDITS, WIKI_PRIORITY, wikiEditInput, type ContestedEdit, type WikiEditInput } from '@story/wikiEdits'
+import { batches, planPlayerPages, playerPagesInput, WIKI_PLAYER, WIKI_PLAYER_PRIORITY } from '@story/wikiPlayer'
+import type { PlayerPagesPlan, PlayerPagesStatus } from '@shared/wiki'
 import {
   anyTakenBack,
   keepTakenBack,
@@ -77,6 +79,7 @@ import {
 import { LORE_REVEAL } from '@story/reveals'
 import { planPolls } from '@story/polls'
 import type { AiService } from './ai'
+import { AppError } from './errors'
 
 const CURSOR = 'events-handled'
 /** A rebuilt input for a waiting job that was the number check's retry keeps that mark (its note, and the job it redoes). */
@@ -196,7 +199,17 @@ export class StoryService {
     const writable = this.ai.fake || !this.ai.unavailable()
     // Words putting right what was written wait for a look that may queue them (the community was off, Claude Code unusable).
     const held = writable && anyTakenBack(db, currentSeason(db).id)
-    if (reactions.length === 0 && rounds.length === 0 && occasions.length === 0 && !held && !voices.some((e) => REACTION_TRIGGERS.has(e.type))) {
+    // Players whose ratings you changed: a 플레이 스타일 written from the old ones is written again.
+    const rerated = [
+      ...new Set(
+        events.flatMap((e) => {
+          if (e.type !== 'player_edited') return []
+          const p = e.payload as EventPayloads['player_edited']
+          return p.fields.some((f) => f.startsWith('ratings.')) ? [p.playerId] : []
+        }),
+      ),
+    ]
+    if (reactions.length === 0 && rounds.length === 0 && occasions.length === 0 && !held && rerated.length === 0 && !voices.some((e) => REACTION_TRIGGERS.has(e.type))) {
       setStoryValue(db, CURSOR, handled)
       return 0
     }
@@ -238,11 +251,14 @@ export class StoryService {
         console.warn('[story] could not queue a reaction', e)
       }
     }
+    // The players whose pages a round's editors touch.
+    const touched: string[] = []
     for (const { seasonId, round } of this.completedRounds(db, events, true)) {
       this.roundPassed(db, seasonId, round)
       try {
         queue('event_thread', roundUpInput(league, seasonId, round))
         if (this.queueWiki(slug, db, folder, roundWikiInput(league, seasonId, round))) queued++
+        touched.push(...roundTop(league, seasonId, round).top.map((l) => l.playerId))
       } catch (e) {
         console.warn('[story] could not queue a round-up', e)
       }
@@ -250,6 +266,15 @@ export class StoryService {
         if (this.hooks.onRound?.(slug, db, folder, seasonId, round)) queued++
       } catch (e) {
         console.warn('[story] could not queue the lore sweep', e)
+      }
+    }
+    // Their pages still showing the app's 플레이 스타일 get one written; after a round, any page written from ratings
+    // or lore play sentences that changed since is written again (after your rating edits, those players').
+    if (rounds.length > 0 || rerated.length > 0) {
+      try {
+        queued += this.queuePlayerPages(slug, db, folder, league, { fresh: touched, stale: rounds.length > 0 ? 'all' : rerated }, 'round').jobs
+      } catch (e) {
+        console.warn('[story] could not queue player pages', e)
       }
     }
     // The players worth hearing from (mood crossings, moves, season awards) say something, a few at a time.
@@ -508,6 +533,58 @@ export class StoryService {
     if (!input || (!this.ai.fake && this.ai.unavailable())) return false
     this.ai.queueFor(slug, db, folder).enqueue(WIKI_EDITS, input, WIKI_PRIORITY)
     return true
+  }
+
+  /**
+   * Player-page jobs (story/wikiPlayer.ts) for the pages that want writing:
+   * of `fresh`, those still showing the app's 플레이 스타일; of `stale`,
+   * those written from ratings or lore play sentences that changed since.
+   * About six of one school a job, below chatter in the queue. Nothing while
+   * Claude Code isn't usable, or in a queue that doesn't run them (a test's).
+   * Returns the jobs and the players in them.
+   */
+  private queuePlayerPages(slug: string, db: Db, folder: string, league: League, who: Parameters<typeof planPlayerPages>[1], why: string): PlayerPagesPlan {
+    const none = { jobs: 0, players: 0 }
+    if (!this.ai.fake && this.ai.unavailable()) return none
+    const queue = this.ai.queueFor(slug, db, folder)
+    if (!queue.knows?.(WIKI_PLAYER)) return none
+    upgradeWiki(db, Date.now())
+    seedWiki(db, league.config, league.lore, Date.now())
+    const out = { ...none }
+    for (const batch of batches(planPlayerPages(league, who))) {
+      const input = playerPagesInput(league, batch, `${why}:${lastEventId(db)}:${batch[0]!.player.id}`)
+      if (!input) continue
+      queue.enqueue(WIKI_PLAYER, input, WIKI_PLAYER_PRIORITY)
+      out.jobs++
+      out.players += input.targets.length
+    }
+    return out
+  }
+
+  /** 선수 문서 다듬기, counted before you're asked: the pages that want writing (not yet in a job) and the jobs they'd take. */
+  playerPagesPlan(db: Db, folder: string): PlayerPagesPlan {
+    const league = readLeague(db, folder)
+    upgradeWiki(db, Date.now())
+    seedWiki(db, league.config, league.lore, Date.now())
+    const needs = planPlayerPages(league, { fresh: 'all', stale: 'all' })
+    return { jobs: batches(needs).length, players: needs.length }
+  }
+
+  /**
+   * 선수 문서 다듬기 (편집실 → 위키): every page still showing the app's
+   * 플레이 스타일, or written from ratings or lore that changed since, in jobs
+   * of about six a school, below chatter; 취소 in 최근 작업 takes them back.
+   * Refused while Claude Code isn't usable.
+   */
+  polishPlayerPages(slug: string, db: Db, folder: string): PlayerPagesPlan {
+    if (!this.ai.fake && this.ai.unavailable()) throw new AppError('ai-unavailable', 'Claude Code is not ready')
+    return this.queuePlayerPages(slug, db, folder, this.league(db, folder), { fresh: 'all', stale: 'all' }, 'polish')
+  }
+
+  /** Player-page jobs still in the queue, for 편집실 → 위키. */
+  playerPagesStatus(db: Db): PlayerPagesStatus {
+    const count = (status: string) => (db.prepare('SELECT COUNT(*) AS n FROM jobs WHERE kind = ? AND status = ?').get(WIKI_PLAYER, status) as { n: number }).n
+    return { waiting: count('queued'), running: count('running') }
   }
 
   /** Whether the wiki's editors can write now: the community is on and Claude Code works. */
