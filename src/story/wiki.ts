@@ -21,6 +21,7 @@ import {
 import type { LoreLinks } from '@lore/folder'
 import type { PlayerRow } from '@shared/league'
 import type { Team } from '@shared/setup'
+import { leagueRules, type RulePart } from './leagueRules'
 
 /**
  * Seeds the wiki: one page per player, team, the league, the current season,
@@ -28,7 +29,9 @@ import type { Team } from '@shared/setup'
  * Seeded text is a starting point written by "2K World"; the infobox, the
  * [기록]/[역사]/[정보]/[인간관계] macros and the text a player page shows in
  * its empty 개요 and 플레이 스타일 stay live from the league data. Existing
- * pages are never touched, but for the one-time layout upgrade (upgradeWiki).
+ * pages are never touched, but for the one-time layout upgrade (upgradeWiki)
+ * and the 규칙 and 드래프트 pages, which follow the rules while only 2K World
+ * has written them (syncRulePages).
  */
 
 export interface WikiTitles {
@@ -396,34 +399,22 @@ function leaguePage(config: LeagueConfig, titles: WikiTitles, teams: Team[]): st
   return lines.join('\n')
 }
 
-function rulesPage(config: LeagueConfig, titles: WikiTitles): string {
-  const s = config.season
-  const schedule =
-    s.schedule.kind === 'round-robin'
-      ? `리그 전체 라운드 로빈 ${s.schedule.cycles}회${s.schedule.build === 'played' ? ' (2K 일정대로: 정해진 라운드 없이 경기한 날을 N일차로 묶어서, 학교마다 치른 경기 수가 다를 수 있다)' : ''}`
-      : `팀당 ${s.schedule.gamesPerTeam}경기`
-  const playoffs = s.playoffs.enabled
-    ? `${s.playoffs.bracket === 'conference' ? '컨퍼런스별' : '리그 전체'} 플레이오프${s.playoffs.playIn.enabled ? ', 플레이-인 토너먼트 포함' : ''}`
-    : '플레이오프 없음'
-  const once = config.trades.oncePerSeason
-  const trades = config.trades.enabled
-    ? [
-        `트레이드 가능${config.trades.equalPlayerCount ? ' (같은 인원끼리)' : ''}. 플레이오프 중에는 모든 선수가 묶인다.`,
-        once.enabled ? ` 한 번 트레이드된 선수는 ${once.until === 'draft' ? '드래프트' : '시즌이 끝날 때'}까지 다시 트레이드할 수 없다.` : '',
-      ].join('')
-    : '트레이드 없음'
+/** The digest's sections (leagueRules.ts) as wiki sections: a heading and the rules as a list. */
+function ruleSections(config: LeagueConfig, teams: readonly Team[], parts: readonly RulePart[]): string[] {
+  return leagueRules(config, teams)
+    .filter((s) => parts.includes(s.part))
+    .flatMap((s) => [`== ${s.title} ==`, bullets(s.lines)])
+}
+
+/** The 규칙 page: the rules writers get (구성, 정규시즌, 플레이오프, 트레이드), the card draft on its own page. */
+function rulesPage(config: LeagueConfig, titles: WikiTitles, teams: readonly Team[]): string {
   // Only the card swap runs: an old 'standard' setting never held a draft (the season goes straight to the offseason).
-  const draft = config.draft.kind === 'card-swap' ? `카드 스왑 드래프트. 자세한 내용은 [[${titles.draft}]] 참고.` : '드래프트는 없다.'
+  const draft = config.draft.kind === 'card-swap' ? `카드 스왑 드래프트. 카드와 지명 규칙은 [[${titles.draft}]] 참고.` : '드래프트는 없다.'
   return [
     '[목차]',
     '== 개요 ==',
-    `[[${titles.league}]]의 규칙을 정리한 문서다. 자세한 수치는 리그 설정을 따른다.`,
-    '== 정규시즌 ==',
-    bullets([`일정: ${schedule}`, `동률 처리: ${s.standings.tiebreakers.length}단계 타이브레이커`]),
-    '== 플레이오프 ==',
-    playoffs,
-    '== 트레이드 ==',
-    trades,
+    `[[${titles.league}]]의 규칙을 정리한 문서다.`,
+    ...ruleSections(config, teams, ['league', 'season', 'playoffs', 'trades']),
     '== 드래프트 ==',
     draft,
     '[[분류:리그]]',
@@ -453,21 +444,43 @@ function awardsPage(config: LeagueConfig, titles: WikiTitles): string {
   ].join('\n')
 }
 
-function draftPage(config: LeagueConfig, titles: WikiTitles): string {
-  const d = config.draft
-  const how =
-    d.kind === 'card-swap'
-      ? [
-          '정규시즌 순위에 따라 카드를 받고, 순위가 낮은 팀부터 카드를 써서 다른 팀 선수와 맞바꾼다.',
-          bullets([
-            d.protection ? '먼저 카드를 써서 자기 선수를 보호할 수 있다.' : '보호 단계는 없다.',
-            d.turns === 'one' ? '한 차례에 카드 한 장씩 돌아가며 쓴다.' : '자기 차례에 카드를 모두 쓴다.',
-            '한 번 옮긴 선수는 드래프트가 끝날 때까지 보호돼 다시 옮길 수 없다.',
-            d.unusedCards === 'expire' ? '쓰지 않은 카드는 사라진다.' : '쓰지 않은 카드는 다음 시즌으로 넘어간다.',
-          ]),
-        ].join('\n')
-      : '드래프트가 없다.'
-  return ['[목차]', '== 개요 ==', `[[${titles.league}]]의 드래프트.`, '== 방식 ==', how, '[[분류:리그]]'].join('\n')
+/** The 드래프트 page: the card swap's rules from the digest (카드, 드래프트), or that there's none. */
+function draftPage(config: LeagueConfig, titles: WikiTitles, teams: readonly Team[]): string {
+  if (config.draft.kind !== 'card-swap') return ['[목차]', '== 개요 ==', `[[${titles.league}]]의 드래프트.`, '== 방식 ==', '드래프트가 없다.', '[[분류:리그]]'].join('\n')
+  return [
+    '[목차]',
+    '== 개요 ==',
+    `[[${titles.league}]]의 카드 스왑 드래프트. 정규시즌 최종 순위에 따라 카드를 받고, 순위가 낮은 학교부터 카드를 써서 다른 학교 선수와 맞바꾼다. 트레이드 규칙은 [[${titles.rules}]] 참고.`,
+    ...ruleSections(config, teams, ['cards', 'draft']),
+    '[[분류:리그]]',
+  ].join('\n')
+}
+
+/**
+ * The 규칙 and 드래프트 pages follow the rules while only 2K World has ever
+ * written them: when the league's rules or its frozen schools change (or the
+ * digest's wording does), an untouched page is written again, as 2K World
+ * ('규칙 갱신'), so it's no one's edit. A page anyone else ever edited stays
+ * as they left it. Links use the pages' own titles. Returns how many changed.
+ */
+export function syncRulePages(db: Db, config: LeagueConfig, titles: WikiTitles, teams: readonly Team[], nowMs: number): number {
+  const own = (kind: 'league' | 'rules' | 'draft', fallback: string) => pageByRef(db, kind, kind)?.title ?? fallback
+  const linked = { ...titles, league: own('league', titles.league), rules: own('rules', titles.rules), draft: own('draft', titles.draft) }
+  let changed = 0
+  for (const kind of ['rules', 'draft'] as const) {
+    try {
+      const page = pageByRef(db, kind, kind)
+      if (!page || page.currentRev === null) continue
+      if (db.prepare('SELECT 1 FROM wiki_revisions WHERE page_id = ? AND author_id <> ? LIMIT 1').get(page.id, SYSTEM)) continue
+      const body = kind === 'rules' ? rulesPage(config, linked, teams) : draftPage(config, linked, teams)
+      if (revisionBody(db, page.id, page.currentRev)?.body === body) continue
+      saveRevision(db, { title: page.title, body, authorId: SYSTEM, summary: '규칙 갱신', baseRev: page.currentRev }, nowMs)
+      changed++
+    } catch (e) {
+      console.warn(`[wiki] could not bring the ${kind} page up to date`, e)
+    }
+  }
+  return changed
 }
 
 function seasonPage(titles: WikiTitles, label: string): string {
@@ -540,7 +553,11 @@ export function syncSchoolCategories(db: Db, config: LeagueConfig, nowMs: number
   return changed
 }
 
-/** Creates any page that doesn't exist yet. Returns how many were made. */
+/**
+ * Creates any page that doesn't exist yet, and brings the 규칙 and 드래프트
+ * pages up to the rules while only 2K World has written them
+ * (syncRulePages). Returns how many pages were made.
+ */
 export function seedWiki(db: Db, config: LeagueConfig, lore: LoreLinks, nowMs: number): number {
   const teams = listTeams(db)
   const players = listPlayers(db)
@@ -560,9 +577,9 @@ export function seedWiki(db: Db, config: LeagueConfig, lore: LoreLinks, nowMs: n
     }
   }
   make('league', 'league', titles.league, () => leaguePage(config, titles, teams))
-  make('rules', 'rules', titles.rules, () => rulesPage(config, titles))
+  make('rules', 'rules', titles.rules, () => rulesPage(config, titles, teams))
   make('awards', 'awards', titles.awards, () => awardsPage(config, titles))
-  make('draft', 'draft', titles.draft, () => draftPage(config, titles))
+  make('draft', 'draft', titles.draft, () => draftPage(config, titles, teams))
   make('season', String(season.id), titles.season, () => seasonPage(titles, season.label))
   for (const t of teams) make('team', t.id, titles.team.get(t.id)!, () => teamPage(config, titles, t, lore))
   for (const p of players) make('player', p.id, titles.player.get(p.id)!, () => playerPage(titles, p, lore))
@@ -570,5 +587,6 @@ export function seedWiki(db: Db, config: LeagueConfig, lore: LoreLinks, nowMs: n
     if (w.kind !== 'world') continue
     make('topic', `world:${w.settings.id}`, w.settings.id, () => topicPage(w.settings.id, w.sections.public, w.sections.rumor, w.settings.involves))
   }
+  syncRulePages(db, config, titles, teams, nowMs)
   return made
 }

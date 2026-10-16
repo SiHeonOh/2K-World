@@ -27,6 +27,7 @@ import { jsonField, transaction, type Db } from '@data/db'
 import { currentSeason, listEvents, listPlayers, listTeams, loadConfig, updateConfig } from '@data/league'
 import { addTalk, closeThread, commentCount, getThread, openDisputes, openThread, openThreadCount, recentThreads, reopenThread, talkLines, threadsOfPage, threadSummary } from '@data/talk'
 import { listAwards } from '@data/moves'
+import { readDraftOutlook } from '@data/draftOutlook'
 import { playoffsView, seasonBoxLines, standings } from '@data/season'
 import {
   authorOf,
@@ -535,8 +536,9 @@ export class WikiService {
   /**
    * A school's box, as Namuwiki's: "가람고등학교 농구부" in its colours; 소속
    * (the league, conference and division), 팀 컬러 as swatches, 이번 시즌
-   * (record and place), 최고 성적 (its best playoff finish) and 라이벌, each
-   * only when there's something to say.
+   * (record and place), 드래프트 카드 (a card-swap league's: held now, and
+   * what it's on track to have), 최고 성적 (its best playoff finish) and
+   * 라이벌, each only when there's something to say.
    */
   private teamBox(db: Db, ctx: Ctx, t: Team): Infobox {
     const league = ctx.league()
@@ -550,6 +552,7 @@ export class WikiService {
     add({ label: '소속', value: [ctx.config.league.name, schoolPlace(ctx.config, t.divisionId).join(' · ')].filter(Boolean).join(' '), link: ctx.titles.league })
     add({ label: '팀 컬러', value: '', link: null, swatches: colors })
     if (line) add({ label: '이번 시즌', value: `${line.wins}승 ${line.losses}패 (${rank + 1}위)`, link: ctx.titles.season })
+    add({ label: '드래프트 카드', value: this.draftCards(db, t.id), link: ctx.titles.draft })
     add({ label: '최고 성적', value: this.bestFinish(db, ctx, t.id), link: null })
     const lore = league.lore.team.get(t.id)
     const rivals = (lore?.kind === 'team' ? lore.settings.rivals : []).map((r) => {
@@ -558,6 +561,22 @@ export class WikiService {
     })
     add({ label: '라이벌', value: rivals.join(', '), link: null, wiki: true })
     return { title: `${t.name} 농구부`, subtitle: null, colors, rows }
+  }
+
+  /**
+   * A school's draft cards for its box: held now, and what it's on track to
+   * have at the draft ("3장 보유 · 드래프트 예상 4장"); in the draft, the cards
+   * it has left. '' without the card-swap draft.
+   */
+  private draftCards(db: Db, teamId: string): string {
+    const o = readDraftOutlook(db)
+    const s = o?.schools.find((x) => x.teamId === teamId)
+    if (!o || !s) return ''
+    if (s.frozen) return '동결 (드래프트 불참)'
+    if (o.room) return `남은 카드 ${s.held.length}장`
+    const held = `${s.held.length}장 보유`
+    if (o.final) return `${held} · 드래프트 때 ${s.projected}장`
+    return o.phase === 'regular' && o.played > 0 ? `${held} · 드래프트 예상 ${s.projected}장` : held
   }
 
   /** How far a school went in a season's playoffs, as its season table says it, coloured; null when the season had none (yet). */

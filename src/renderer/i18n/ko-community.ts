@@ -119,6 +119,7 @@ export const communityText = {
       poll: '투표',
       game_talk: '지난 경기',
       analysis: '분석 글',
+      draft_watch: '드래프트 보호 위기',
     } as Record<string, string>,
     topicHelp: {
       lore_story: '로어의 공개 이야기, 별명 유래, 플레이 스타일',
@@ -137,6 +138,7 @@ export const communityText = {
       poll: 'MVP 등 투표',
       game_talk: '지난 경기 다시 씹기',
       analysis: '기자나 분석러가 쓰는 장문: 연승·연패, 의외의 성적, 선수 상승세, 맞대결 프리뷰, 순위 싸움, 에이스 비교를 시즌 기록으로 뜯어봐요. 글이 길어서 AI 사용량을 더 써요.',
+      draft_watch: '카드를 팔아 스타를 다 못 지킬 학교, 남의 카드를 쌓아 둔 학교 (그런 학교가 있을 때만)',
     } as Record<string, string>,
     enabled: '커뮤니티 켜기 (끄면 새 글을 쓰지 않아요)',
     myNick: '내 닉네임',

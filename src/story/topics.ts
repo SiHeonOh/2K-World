@@ -6,7 +6,9 @@ import { playedMode, roundLabel } from '@shared/played'
 import { currentSeason, listPlayers, listTeams } from '@data/league'
 import { listGames, seasonBoxLines, standings } from '@data/season'
 import { listAwards } from '@data/moves'
+import { draftWatch, readDraftOutlook, type DraftOutlook } from '@data/draftOutlook'
 import type { League } from './context'
+import { schoolCards } from './draftCards'
 import {
   bigSwing,
   closeRaces,
@@ -50,6 +52,8 @@ export interface TopicSeed {
   tag?: string
   /** A poll topic's question and options: the post carries a real poll that fans vote on. */
   poll?: { question: string; options: string[] }
+  /** About trades, rumours, the draft or the GMs: the writers get every school's cards, not only the schools named. */
+  market?: boolean
   length: PostLength
   /** What a long post reads as (분석글, 썰, 뇌피셜, 비교글). */
   form?: string
@@ -67,10 +71,12 @@ interface Ctx {
   ovr: (playerId: string) => number | null
   short: (teamId: string) => string
   slot: (slotId: string | null) => string
-  /** Players already used in this batch, so one name doesn't carry every post. */
+  /** Players already used in this batch, so one name doesn't carry every post (and, as `draft:<school>`, the draft storyline's schools). */
   used: Set<string>
   /** The season's numbers, read the first time a topic needs them. */
   season: () => Season
+  /** Each school's draft cards (null without the card-swap draft), read the first time a topic needs them. */
+  outlook: () => DraftOutlook | null
 }
 
 /**
@@ -98,13 +104,14 @@ const LONG_FORM: Partial<Record<TopicKind, string>> = {
   rumor: '뇌피셜',
   prediction: '뇌피셜',
   drama: '뇌피셜',
+  draft_watch: '뇌피셜',
 }
 
 /** Kinds that stay short: a poll's body is a jab, a newbie asks in a line or two. */
 const SHORT_ONLY: ReadonlySet<TopicKind> = new Set(['poll', 'newbie'])
 
 /** Kinds that can be a one-liner (a title, a "(움짤) …" line): taunts, jokes, a scene, a call. The rest need a body. */
-const LINE_OK: ReadonlySet<TopicKind> = new Set(['meme', 'off_topic', 'school_pride', 'game_talk', 'rivalry', 'league_roast', 'drama', 'prediction', 'poll', 'newbie'])
+const LINE_OK: ReadonlySet<TopicKind> = new Set(['meme', 'off_topic', 'school_pride', 'game_talk', 'rivalry', 'league_roast', 'drama', 'prediction', 'poll', 'newbie', 'draft_watch'])
 
 /**
  * Gives each topic its length by LENGTH_MIX: analysis long, then other
@@ -195,7 +202,32 @@ interface Subject {
   teams: string[]
   players: string[]
   pack: string[]
+  /** About the draft or trades: the writers get every school's cards. */
+  market?: boolean
 }
+
+/**
+ * A school in the draft's storyline ("드래프트 보호 위기", draftWatch): short of
+ * cards for the stars it would protect, or sitting on others' cards; one
+ * this batch hasn't written about yet (it, or its stars). Undefined when
+ * there's none.
+ */
+function watched(c: Ctx) {
+  const o = c.outlook()
+  const pick = o ? c.pick(draftWatch(o).filter((w) => !c.used.has(`draft:${w.teamId}`) && !w.stars.some((id) => c.used.has(id)))) : undefined
+  return o && pick ? { o, w: pick, card: schoolCards(c.league, o, pick.teamId) } : undefined
+}
+
+/** A player as the draft topics name him: "김하람(OVR 95)". */
+const starName = (c: Ctx, id: string) => `${c.league.players.get(id)?.name ?? id}${c.ovr(id) !== null ? `(OVR ${c.ovr(id)})` : ''}`
+
+/** A crunch as fans put it: no card at all, fewer cards than stars, or a star whose protection takes the last card. */
+const crunchText = (w: { stars: string[]; projected: number }) =>
+  w.projected === 0
+    ? '드래프트 때 쓸 카드가 한 장도 없을 판이라 스타를 지킬 수조차 없다'
+    : w.projected < w.stars.length
+      ? `지킬 스타는 ${w.stars.length}명인데 드래프트 때 카드는 ${w.projected}장뿐이다`
+      : '스타를 카드로 지키고 나면 지명할 카드가 남지 않는다'
 
 /** Schools a few games into the season: a record worth reading. */
 const settled = (s: Season, games = 4) => s.games.length * 2 >= s.refs.length * games
@@ -341,6 +373,26 @@ const SUBJECTS: ((c: Ctx, s: Season) => Subject | null)[] = [
       pack: [...playerSeason(s, a), ...playerSeason(s, b), teamProfile(s, teamOf(a))[0]!, teamProfile(s, teamOf(b))[0]!],
     }
   },
+  // The draft's storyline as a column: a school short of cards for its stars, or one hoarding them.
+  (c, s) => {
+    const found = watched(c)
+    if (!found) return null
+    const { w, card } = found
+    const team = c.short(w.teamId)
+    const stars = w.stars.slice(0, 2)
+    return {
+      topic: w.kind === 'crunch' ? `${team} 드래프트 보호 위기` : `${team} 카드 사재기`,
+      brief:
+        w.kind === 'crunch'
+          ? `${team}, ${crunchText(w)}: 누구를 지키고 누구를 내줄 각오를 해야 하는지, 남은 순위 싸움으로 카드를 더 받을 길이 있는지, 다른 학교들이 누구를 노릴지 리그 규칙대로 따진다.`
+          : `${team}, 남의 카드를 쌓아 두고 드래프트를 기다린다: 보호에 몇 장, 지명에 몇 장을 쓸 수 있는지, 카드를 판 학교들은 무엇을 얻었는지 리그 규칙대로 따진다.`,
+      skeleton: 'B',
+      teams: [w.teamId],
+      players: stars,
+      pack: [...(card ? [card] : []), ...teamProfile(s, w.teamId), ...stars.flatMap((id) => playerSeason(s, id))],
+      market: true,
+    }
+  },
 ]
 
 const MAKERS: Record<TopicKind, Maker> = {
@@ -376,6 +428,8 @@ const MAKERS: Record<TopicKind, Maker> = {
       facts: s.kind === 'player' ? playerFacts(c, s.id) : [`학교: ${c.short(s.id)}`],
       teams: [s.teamId],
       players: s.kind === 'player' ? [s.id] : [],
+      // 찌라시 runs to trade talk.
+      market: true,
     }
   },
 
@@ -425,6 +479,7 @@ const MAKERS: Record<TopicKind, Maker> = {
     const cfg = c.league.config
     const table = standings(c.league.db)
     const frozen = listTeams(c.league.db).filter((t) => t.control === 'frozen')
+    const angle = c.pick(ROAST_ANGLES)!
     const facts = [
       `리그: ${cfg.league.name}, ${c.league.teams.size}개 학교, 컨퍼런스 ${cfg.structure.conferences.length}개, 디비전 ${cfg.structure.divisions.length}개`,
       ...(table.overall.length ? [`1위 ${c.short(table.overall[0]!.teamId)}, 꼴찌 ${c.short(table.overall.at(-1)!.teamId)}`] : []),
@@ -436,10 +491,12 @@ const MAKERS: Record<TopicKind, Maker> = {
       kind: 'league_roast',
       board: 'humor',
       tag: '유머',
-      brief: `리그 전체를 까거나 비꼬는 드립 글. 각도: ${c.pick(ROAST_ANGLES)}. 실존 인물이나 혐오 표현 없이, 리그와 제도를 웃기게 깐다.`,
+      brief: `리그 전체를 까거나 비꼬는 드립 글. 각도: ${angle}. 실존 인물이나 혐오 표현 없이, 리그와 제도를 웃기게 깐다.`,
       facts,
       teams: [],
       players: [],
+      // Roasting the card draft or the trade ban: the writers see who holds what.
+      ...(/카드|트레이드/.test(angle) ? { market: true } : {}),
     }
   },
 
@@ -560,7 +617,7 @@ const MAKERS: Record<TopicKind, Maker> = {
       kind: 'newbie',
       board: 'free',
       tag: '질문',
-      brief: '뉴비 질문 글 (어느 학교 응원할지, 규칙이 뭔지, 누가 잘하는지 등). 댓글은 친절한 고인물, 자기 학교 영업, 놀리는 사람이 섞인다. 규칙 설명은 아래 사실과 맞게.',
+      brief: '뉴비 질문 글 (어느 학교 응원할지, 트레이드나 카드 드래프트 규칙이 뭔지, 누가 잘하는지 등). 댓글은 친절한 고인물, 자기 학교 영업, 놀리는 사람이 섞인다. 규칙 설명은 "리그 규칙"과 아래 사실대로.',
       facts,
       teams: team ? [team.id] : [],
       players: [],
@@ -586,6 +643,8 @@ const MAKERS: Record<TopicKind, Maker> = {
       facts: playerFacts(c, r.player_id),
       teams: [c.league.players.get(r.player_id)?.teamId ?? ''],
       players: [r.player_id],
+      // An unhappy player sets off trade talk.
+      market: true,
     }
   },
 
@@ -657,6 +716,8 @@ const MAKERS: Record<TopicKind, Maker> = {
     const subject = c.pick(SUBJECTS.map((f) => f(c, s)).filter((x): x is Subject => x !== null))
     if (!subject) return null
     for (const p of subject.players) c.used.add(p)
+    // The draft storyline's school isn't written up twice in a batch.
+    if (subject.market) for (const t of subject.teams) c.used.add(`draft:${t}`)
     return {
       kind: 'analysis',
       board: 'main',
@@ -666,6 +727,29 @@ const MAKERS: Record<TopicKind, Maker> = {
       pack: subject.pack,
       teams: subject.teams,
       players: subject.players,
+      ...(subject.market ? { market: true } : {}),
+    }
+  },
+
+  // 드래프트 보호 위기: only while a school is short of cards for its stars, or sits on others' cards.
+  draft_watch: (c) => {
+    const found = watched(c)
+    if (!found) return null
+    const { w, card } = found
+    const team = c.short(w.teamId)
+    for (const id of [...w.stars, `draft:${w.teamId}`]) c.used.add(id)
+    return {
+      kind: 'draft_watch',
+      board: 'draft',
+      tag: '드래프트',
+      brief:
+        w.kind === 'crunch'
+          ? `${team} 드래프트 보호 위기 글: ${crunchText(w)}. 카드 한 장에 한 명만 지킬 수 있으니 누구를 지키고 누구를 뺏길지, 카드를 왜 팔았는지(판 적이 있다면), 순위를 올려 카드를 더 받을 길이 있는지 떠든다. 다른 학교 팬은 누구를 털어올지 군침 흘리고, 그 학교 팬은 단장 탓과 자조. 카드 수와 규칙은 자료와 "리그 규칙" 그대로.`
+          : `${team} 카드 사재기 글: 남의 학교 카드를 쌓아 두고 드래프트를 기다린다. 누구를 털어갈지, 다 지키고도 남는지, 카드를 판 학교 팬의 후회와 "카드 깡패" 드립. 카드 수와 규칙은 자료와 "리그 규칙" 그대로.`,
+      facts: [...(card ? [card] : []), ...(w.stars.length ? [`리그 정상급(상위 10%) 선수: ${w.stars.map((id) => starName(c, id)).join(', ')}`] : [])],
+      teams: [w.teamId],
+      players: w.stars,
+      market: true,
     }
   },
 }
@@ -683,8 +767,10 @@ export function planTopics(league: League, count: number, seed: number, longLeft
   const roster = listPlayers(league.db)
   const overallId = league.config.ratings.overallColumnId
   let season: Season | null = null
+  let outlook: DraftOutlook | null | undefined
   const ctx: Ctx = {
     season: () => (season ??= readSeason(league)),
+    outlook: () => (outlook === undefined ? (outlook = readDraftOutlook(league.db)) : outlook),
     league,
     random,
     pick: (list) => (list.length ? list[Math.floor(random() * list.length)] : undefined),

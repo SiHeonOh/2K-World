@@ -95,6 +95,13 @@ describe('chatter topics', () => {
     for (let seed = 1; seed <= 10; seed++) expect(planTopics(league, 10, seed, 0).some((s) => s.length === 'long')).toBe(false)
   })
 
+  it('never plans 드래프트 보호 위기 in a league without the card-swap draft', () => {
+    const { config } = loadConfig(db)
+    updateConfig(db, { ...config, community: { ...config.community, topicMix: { draft_watch: 5 } } })
+    const league = readLeague(db, dir)
+    for (let seed = 1; seed <= 15; seed++) expect(planTopics(league, 8, seed).some((s) => s.kind === 'draft_watch')).toBe(false)
+  })
+
   it('hands the writers the plan and the lore, but never a secret', () => {
     const league = readLeague(db, dir)
     ensureCast(league)

@@ -25,6 +25,8 @@ import type { StoryInput, StoryKind } from './jobs'
 import { leagueFeelings } from './feelings'
 import { CAST_HEADING } from './numbers'
 import { gameBlocks, headToHead, playerSeason, readSeason, roundBlocks, seasonNote, teamProfile } from './statsPack'
+import { cardsBlock, MARKET_WORDS } from './draftCards'
+import { RACE_PARTS, rulesBlock, type RulePart } from './leagueRules'
 
 /**
  * Builds what each story job reads: league facts, the game or event, lore
@@ -142,6 +144,14 @@ export function leagueBlock(league: League): string {
   if (finals.length) lines.push('# 최근 결과', ...finals.map((g) => `${round(g.round)} ${score(g)}`))
   if (upcoming.length) lines.push('# 다음 경기', ...upcoming.map((g) => `${round(g.round)} ${short(league, g.away)} @ ${short(league, g.home)}`))
   return lines.join('\n')
+}
+
+/**
+ * The league's rules for writers (leagueRules.ts): all of them, or only the
+ * parts a story needs (the standings race: RACE_PARTS).
+ */
+export function rulesFor(league: League, parts?: readonly RulePart[]): string {
+  return rulesBlock(league.config, listTeams(league.db), parts)
 }
 
 /** What writers are told about a 2K 일정대로 season: no rounds, and uneven games played. */
@@ -535,6 +545,39 @@ export function describeEvent(league: League, e: LeagueEvent): { text: string; t
   }
 }
 
+/** Draft moves: their thread is about the whole draft room. */
+const DRAFT_TYPES = new Set(['draft_protect', 'draft_swap', 'draft_pass'])
+/** A trade window's close and the talks that leaked from it: about the whole market. */
+const MARKET_TYPES = new Set(['trade_window_closed', 'trade_talks'])
+/** The bracket, series and places in the table: the playoffs' format is what writers need. */
+const RACE_TYPES = new Set(['playoffs_seeded', 'series_won', 'standings_moment'])
+
+/**
+ * The rules and cards a thread's events call for. Trades, the draft, a
+ * trade window, players' trade talk and your news about any of it get the
+ * rules; the draft and a window (or its leaks) every school's cards, the
+ * rest only the schools in it, and a trade what each side sent. The
+ * bracket, a series or a place in the table gets how the playoffs work.
+ */
+function marketFacts(league: League, events: LeagueEvent[], described: { teams: string[]; role: string }[]): { rules: string; cards: string; items: string } {
+  const whole = events.some((e) => DRAFT_TYPES.has(e.type) || MARKET_TYPES.has(e.type))
+  const news = events.some((e) => e.type === 'news_posted' && MARKET_WORDS.test((e.payload as EventPayloads['news_posted']).text))
+  if (whole || news || described.some((d) => d.role === 'trades' || d.role === 'draft')) {
+    const teams = [...new Set(described.flatMap((d) => d.teams))]
+    return { rules: rulesFor(league), cards: cardsBlock(league, whole ? 'all' : teams), items: tradeItems(league, events) }
+  }
+  return { rules: events.some((e) => RACE_TYPES.has(e.type)) ? rulesFor(league, RACE_PARTS) : '', cards: '', items: '' }
+}
+
+/** What each school sent in the trades told, players with their positions and cards by name (a blockbuster's facts carry their own). */
+function tradeItems(league: League, events: LeagueEvent[]): string {
+  const lines = events
+    .filter((e) => e.type === 'trade_applied' && !isBlockbusterEvent(e))
+    .flatMap((e) => tradeSides(league, (e.payload as EventPayloads['trade_applied']).tradeId))
+    .map((s) => `- ${short(league, s.from)} → ${short(league, s.to)}: ${[...s.players, ...s.cards].join(', ')}`)
+  return lines.length ? `# 트레이드로 오간 것\n${lines.join('\n')}` : ''
+}
+
 export function eventThreadInput(league: League, events: LeagueEvent[]): StoryInput | null {
   const described = events.map((e) => describeEvent(league, e)).filter((d): d is NonNullable<typeof d> => d !== null)
   if (described.length === 0) return null
@@ -544,6 +587,8 @@ export function eventThreadInput(league: League, events: LeagueEvent[]): StoryIn
   const big = events.length === 1 && isBlockbusterEvent(events[0]!) ? blockbusterFacts(league, events[0]!) : null
   const cast = pickCast(league, { teams, fans: big ? 24 : 16, reporters: 2, salt: `event:${events.map((e) => e.id).join(',')}` })
   const news = `# 이번 소식\n${described.map((d) => `- ${d.text}`).join('\n')}`
+  // Trades and the draft are argued inside the league's real rules, with who holds which cards.
+  const market = marketFacts(league, events, described)
   // A player's words with numbers marked (not in his facts): the forum's posts repeating them are marked too.
   const marked = [
     ...new Set(events.filter((e) => e.type === 'player_said').flatMap((e) => flagsOf(league.db, 'player_quote', (e.payload as EventPayloads['player_said']).quoteId))),
@@ -557,8 +602,11 @@ export function eventThreadInput(league: League, events: LeagueEvent[]): StoryIn
     context: join2(
       boardsBlock(league),
       leagueBlock(league),
+      market.rules,
       news,
       ...(big?.blocks ?? []),
+      market.items,
+      market.cards,
       loreFor(league, teams, players),
       myTakesBlock(league, teams, players),
       castBlock(league, cast),
@@ -710,7 +758,16 @@ export function liveCommentsInput(league: League, events: LeagueEvent[], postId:
   return {
     ...aiFor(league.config, 'live'),
     instructions: `라이브 스레드 글 번호: ${postId ?? '(곧 올라올 글, postId에는 0)'}.`,
-    context: join2(leagueBlock(league), `# 이번 소식 (드래프트 진행)\n${described.map((d) => `- ${d.text}`).join('\n')}`, thread, loreFor(league, teams, players), castBlock(league, cast)),
+    // The draft room as it stands (the order, the card on the clock, every school's cards and moves), inside the real rules.
+    context: join2(
+      leagueBlock(league),
+      rulesFor(league),
+      `# 이번 소식 (드래프트 진행)\n${described.map((d) => `- ${d.text}`).join('\n')}`,
+      cardsBlock(league, 'all'),
+      thread,
+      loreFor(league, teams, players),
+      castBlock(league, cast),
+    ),
     board: boardOf(league, 'draft'),
     postId,
     liveKey,
@@ -779,6 +836,8 @@ export function roundUpInput(league: League, seasonId: number, round: number): S
     context: join2(
       boardsBlock(league),
       leagueBlock(league),
+      // The column's standings race: how ties break and who reaches the playoffs, as the league has it.
+      rulesFor(league, RACE_PARTS),
       news,
       ...roundBlocks(season, label, new Set(games.map((g) => g.id))),
       loreFor(league, leaders, best.map((l) => l.playerId)),
@@ -895,8 +954,11 @@ export function replyInput(league: League, postId: number, commentId: number | n
     instructions: `글 번호는 ${postId}${commentId !== null ? `, 답할 내 댓글 번호는 ${commentId}` : ''}.`,
     context: join2(
       leagueBlock(league),
+      rulesFor(league),
       game?.text ?? '',
       thread,
+      // The cards of the schools you named; every school's when you wrote about trades, cards or the draft.
+      cardsBlock(league, MARKET_WORDS.test(userText) ? 'all' : m.teams),
       loreFor(league, m.teams, m.players),
       myTakesBlock(league, m.teams, m.players, commentId !== null ? { commentId } : { postId }),
       castBlock(league, cast),
@@ -961,7 +1023,19 @@ export function chatterInput(league: League): StoryInput {
   return {
     ...aiFor(league.config, 'chatter'),
     instructions: `위 "이번에 쓸 글" ${seeds.length}개를 하나씩 새 글로 쓰고(글마다 댓글 3~8개${seeds.some((s) => s.length === 'long') ? ', 장문 글은 6~12개' : ''}), "지금 뜨는 글"에 댓글 묶음 3~6개를 단다. 모두 합쳐 ${c.chatterBatch}개 안팎.`,
-    context: join2(boardsBlock(league), leagueBlock(league), plan, loreFor(league, teams, players), worldLore, myTakesBlock(league, teams, players), castBlock(league, cast), coveredBlock(league)),
+    context: join2(
+      boardsBlock(league),
+      leagueBlock(league),
+      rulesFor(league),
+      plan,
+      // The cards of the schools in the plan; every school's when a topic is about trades, rumours, the draft or the GMs.
+      cardsBlock(league, seeds.some((s) => s.market) ? 'all' : teams),
+      loreFor(league, teams, players),
+      worldLore,
+      myTakesBlock(league, teams, players),
+      castBlock(league, cast),
+      coveredBlock(league),
+    ),
     board: boardOf(league, 'free'),
     long: seeds.filter((s) => s.length === 'long').length,
     asOfEvent: lastEventId(league.db),
@@ -1039,6 +1113,7 @@ const TOPIC_LABEL: Record<TopicKind, string> = {
   poll: '투표',
   game_talk: '지난 경기',
   analysis: '분석 글',
+  draft_watch: '드래프트 보호 위기',
 }
 
 export type { StoryKind }

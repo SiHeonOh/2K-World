@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { defaultCardSwap } from '@shared/config/defaults'
 import { sampleSetup } from '@shared/testing/fixtures'
 import { openDb, type Db } from '@data/db'
 import { listPlayers, listTeams, loadConfig, seedLeague, updateConfig } from '@data/league'
@@ -74,6 +75,31 @@ describe('WikiService', () => {
     expect(playerPage.data.infobox?.rows[0]).toMatchObject({ label: '소속', value: team.name, link: team.shortName })
     expect(playerPage.data.record?.rows[0]?.cells.slice(2, 4)).toEqual(['1', '33.0'])
     expect(playerPage.data.history.map((h) => h.text)).toEqual([expect.stringContaining('33점')])
+  })
+
+  it('shows a card-swap league’s draft cards in a school’s infobox: held now, and what it’s on track to have', () => {
+    const { config } = loadConfig(db)
+    updateConfig(db, {
+      ...config,
+      draft: {
+        ...defaultCardSwap(8),
+        allocation: [
+          { fromRank: 1, toRank: 1, cards: 5 },
+          { fromRank: 2, toRank: 8, cards: 3 },
+        ],
+      },
+    })
+    wiki.ensure(db, dir, true)
+    const row = (title: string) => wiki.page(db, dir, title).data.infobox?.rows.find((r) => r.label === '드래프트 카드')
+    startSeason(db)
+    expect(row('가람고')).toMatchObject({ value: '3장 보유', link: '테스트 리그/드래프트' })
+    const game = listGames(db, 1).find((g) => g.home === 't1' || g.away === 't1')!
+    recordScore(db, { gameId: game.id, homeScore: game.home === 't1' ? 90 : 80, awayScore: game.home === 't1' ? 80 : 90, lines: null })
+    // 가람고 won its game: 1st now, two more cards at the end if it stays there.
+    expect(row('가람고')?.value).toBe('3장 보유 · 드래프트 예상 5장')
+    // No card-swap draft, no row.
+    updateConfig(db, { ...loadConfig(db).config, draft: { kind: 'none' } })
+    expect(row('가람고')).toBeUndefined()
   })
 
   it('names weekly and monthly awards by period and group: the 시상 page, his infobox and his history', () => {

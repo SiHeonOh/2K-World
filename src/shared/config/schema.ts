@@ -427,6 +427,8 @@ export const TOPIC_KINDS = [
   'poll',
   'game_talk',
   'analysis',
+  // Added with a default (2026-10-16): a weight left out reads as the default, so older configs need no change.
+  'draft_watch',
 ] as const
 export type TopicKind = (typeof TOPIC_KINDS)[number]
 export const DEFAULT_TOPIC_MIX: Record<TopicKind, number> = {
@@ -447,6 +449,8 @@ export const DEFAULT_TOPIC_MIX: Record<TopicKind, number> = {
   game_talk: 1,
   // Long posts cost more to write: kept modest.
   analysis: 2,
+  // Planned only while a school is short of cards for its stars, or sits on others' cards.
+  draft_watch: 2,
 }
 
 export const communitySchema = z
