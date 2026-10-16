@@ -70,9 +70,43 @@ export function GmSettings() {
             />
           )}
         </Field>
-        {num('tradeWindowEveryRounds', g.windowEvery, undefined, 1, 100)}
+        <Field label={tg.windowMode} help={tg.windowModeHelp}>
+          {(id) => (
+            <Select
+              id={id}
+              value={draft.tradeWindowEveryRounds === 0 ? 'manual' : 'auto'}
+              options={(['auto', 'manual'] as const).map((v) => ({ value: v, label: tg.windowModes[v] }))}
+              onChange={(v) =>
+                edit((d) => {
+                  // Back to a schedule: the saved rhythm if there was one, else every 5.
+                  const saved = league.config.gm.tradeWindowEveryRounds
+                  d.tradeWindowEveryRounds = v === 'manual' ? 0 : saved > 0 ? saved : 5
+                })
+              }
+            />
+          )}
+        </Field>
+        {draft.tradeWindowEveryRounds > 0 ? num('tradeWindowEveryRounds', g.windowEvery, undefined, 1, 100) : null}
         {num('gmsPerWindow', tg.gmsPerWindow, tg.gmsPerWindowHelp, 1, 40)}
         {num('talksPerWindow', tg.talksPerWindow, tg.talksPerWindowHelp, 1, 20)}
+        <Field label={tg.dealCards} help={tg.dealCardsHelp}>
+          {(id) => (
+            <span className="row" style={{ gap: 10 }}>
+              {draft.dealCards === null ? null : (
+                <NumberInput
+                  id={id}
+                  value={draft.dealCards ?? 3}
+                  min={0}
+                  max={20}
+                  onChange={(v) => edit((d) => void (d.dealCards = Math.max(0, Math.min(20, Math.round(v)))))}
+                />
+              )}
+              <Check checked={draft.dealCards === null} onChange={(v) => edit((d) => void (d.dealCards = v ? null : 3))}>
+                {tg.dealCardsNoLimit}
+              </Check>
+            </span>
+          )}
+        </Field>
         <Field label={g.negotiationLog}>
           {(id) => (
             <Select

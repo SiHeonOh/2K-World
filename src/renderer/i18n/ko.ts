@@ -457,6 +457,7 @@ export const ko = {
       autonomies: { propose: '제안만 (승인 필요)', 'auto-within-limits': '제한 안에서 자동 승인', full: '완전 자율' },
       autonomyHelp: '어떤 경우든 규칙 검사를 통과해야 하고, 2K에 적용하기 전까지 거부할 수 있어요.',
       windowEvery: '시즌 중 트레이드 창 주기 (라운드)',
+      windowEveryHelp: '0이면 자동으로 열지 않고, 단장실에서 직접 열 때만 열려요.',
       rumorLeaks: '협상 내용이 찌라시로 새어 나갈 수 있음',
       negotiationLog: '협상 기록 공개',
       negotiationLogs: { live: '실시간으로 보기', 'after-window': '트레이드 창이 닫힌 뒤에' },

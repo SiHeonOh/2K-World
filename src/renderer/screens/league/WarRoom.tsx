@@ -119,6 +119,8 @@ export function WarRoom() {
                 </span>
               ) : status.value.nextRound !== null ? (
                 <span className="muted">{tg.nextWindow(status.value.nextRound, roundName)}</span>
+              ) : status.value.manual && status.value.blocked !== 'phase' ? (
+                <span className="muted">{tg.manualOnly}</span>
               ) : (
                 <span className="muted">{tg.blocked.phase}</span>
               )}

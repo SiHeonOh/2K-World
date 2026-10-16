@@ -186,6 +186,19 @@ describe('what the review found', () => {
     expect(listEvents(db, 'trade_window_opened')).toHaveLength(0)
   })
 
+  it('with no schedule (every 0) a round never opens a window, but 단장실 still can', () => {
+    setGm({ tradeWindowEveryRounds: 0 })
+    expect(gm.onRound('test', db, dir, currentSeason(db).id, 1)).toBe(false)
+    expect(gm.onRound('test', db, dir, currentSeason(db).id, 5)).toBe(false)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM trade_windows').get()).toEqual({ n: 0 })
+    const status = gm.status('test', db, dir)
+    expect(status.manual).toBe(true)
+    expect(status.nextRound).toBeNull()
+    const opened = gm.openWindow('test', db, dir, 'manual', null)
+    expect(opened.windowId).not.toBeNull()
+    expect(gm.status('test', db, dir).open?.id).toBe(opened.windowId)
+  })
+
   it('a window stuck open doesn’t swallow the next scheduled one', () => {
     setGm({ tradeWindowEveryRounds: 1 })
     insertWindow(db, currentSeason(db).id, currentSeason(db).phase, null, 'manual', Date.now())

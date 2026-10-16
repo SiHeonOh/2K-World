@@ -236,6 +236,24 @@ describe('superstar trades: card packages', () => {
     for (const s of candidates(spent, 't2')) expect(s.deal.aCards).toEqual([])
   })
 
+  it('단장 설정 sets how many cards a side may carry: fewer, none, or as many as it holds', () => {
+    const market = (dealCards: number | null) => {
+      // A balanced seller wants two cards (4 + 9.3); no in-season cap left to say otherwise.
+      const m = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, unhappy: ['t1p1'], cards })
+      m.config.gm.dealCards = dealCards
+      return m
+    }
+    const all = (m: Market) => [...candidates(m, 't2'), ...counters(m, { a: 't2', b: 't1', aGives: ['t2p1'], bGives: ['t1p1'], aCards: [], bCards: [] })]
+    const one = market(1)
+    for (const s of all(one)) expect(Math.max(s.deal.aCards.length, s.deal.bCards.length)).toBeLessThanOrEqual(1)
+    expect(candidates(one, 't2').some(forStar)).toBe(false)
+    for (const s of all(market(0))) expect([...s.deal.aCards, ...s.deal.bCards]).toEqual([])
+    // No limit: the two-card offer is back, and nothing carries more than the four cards it can trade.
+    const open = market(null)
+    expect(candidates(open, 't2').find(forStar)?.deal.aCards.sort()).toEqual([11, 13])
+    for (const s of all(open)) expect(s.deal.aCards.length).toBeLessThanOrEqual(4)
+  })
+
   it('the receiver can ask for cards in a counter', () => {
     const m = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, unhappy: ['t1p1'], cards, room: { t2: 2 } })
     const offer: Deal = { a: 't2', b: 't1', aGives: ['t2p1'], bGives: ['t1p1'], aCards: [], bCards: [] }

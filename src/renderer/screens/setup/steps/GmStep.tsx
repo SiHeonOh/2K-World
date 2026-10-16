@@ -29,14 +29,14 @@ export function GmStep({ state, edit, issues }: StepProps) {
               />
             )}
           </Field>
-          <Field label={g.windowEvery}>
+          <Field label={g.windowEvery} help={g.windowEveryHelp}>
             {(id) => (
               <NumberInput
                 id={id}
                 value={gm.tradeWindowEveryRounds}
-                min={1}
+                min={0}
                 max={100}
-                onChange={(v) => edit((s) => void (s.setup.config.gm.tradeWindowEveryRounds = Math.max(1, v)))}
+                onChange={(v) => edit((s) => void (s.setup.config.gm.tradeWindowEveryRounds = Math.max(0, v)))}
               />
             )}
           </Field>

@@ -377,8 +377,8 @@ export const aiConfigSchema = z.preprocess(
 
 export const gmSchema = z.object({
   autonomy: z.enum(['propose', 'auto-within-limits', 'full']),
-  /** In-season trade windows open every N rounds. */
-  tradeWindowEveryRounds: int(1, 100),
+  /** In-season trade windows open every N rounds (sessions in 2K 일정대로); 0: only when you open one in 단장실. */
+  tradeWindowEveryRounds: int(0, 100),
   rumorLeaks: z.boolean(),
   /** 'live': watch talks as they happen. 'after-window': locked until the window closes. */
   negotiationLog: z.enum(['live', 'after-window']),
@@ -387,6 +387,8 @@ export const gmSchema = z.object({
   gmsPerWindow: int(1, 40).default(8),
   /** Negotiations one window may hold. */
   talksPerWindow: int(1, 20).default(6),
+  /** Cards one side of an AI deal may carry; null: as many as it holds (the in-season cap still applies). */
+  dealCards: int(0, 20).nullable().default(3),
 })
 
 // ── Community ────────────────────────────────────────────────────────────

@@ -94,7 +94,7 @@ export interface Scored {
 
 /** A gap this big (in value points, about one good starter) gets the deal tagged as lopsided. */
 export const LOPSIDED_GAP = 15
-/** Cards one side may put into a deal, at most (fewer when the in-season cap leaves less room). */
+/** Cards one side may put into a deal unless 단장 설정 says otherwise (fewer when the in-season cap leaves less room). */
 export const MAX_CARDS = 3
 /** A deal a GM would offer is worth more than this to it… */
 const WORTH = 0.15
@@ -169,15 +169,20 @@ function freeOf(m: Market, teamId: string): MarketPlayer[] {
   return list
 }
 
-/** How many cards a team may put into one deal: three, or what the in-season cap leaves it. */
+/**
+ * How many cards a team may put into one deal: the league's setting (three
+ * unless changed; none set means as many as it holds), or what the in-season
+ * cap leaves it, whichever is less.
+ */
 function cardRoom(m: Market, teamId: string): number {
-  return Math.max(0, Math.min(MAX_CARDS, index(m).team.get(teamId)?.cardRoom ?? MAX_CARDS))
+  const setting = m.config.gm.dealCards === undefined ? MAX_CARDS : m.config.gm.dealCards
+  const most = setting === null ? Number.POSITIVE_INFINITY : setting
+  return Math.max(0, Math.min(most, index(m).team.get(teamId)?.cardRoom ?? most))
 }
 
 /**
- * A team's card packages: every set of one to three of its tradable cards
- * (fewer when the cap leaves less room), cheapest first, and fewer cards
- * first when two cost the same.
+ * A team's card packages: every set of its tradable cards up to its room
+ * (see cardRoom), cheapest first, and fewer cards first when two cost the same.
  */
 function packsOf(m: Market, teamId: string): Pack[] {
   const i = index(m)

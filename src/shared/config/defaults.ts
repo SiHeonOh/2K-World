@@ -115,6 +115,7 @@ export function defaultConfig(): LeagueConfig {
       negotiationLog: 'live',
       gmsPerWindow: 8,
       talksPerWindow: 6,
+      dealCards: 3,
     },
     community: defaultCommunity(''),
     lore: { roundSweep: true, suggest: {} },

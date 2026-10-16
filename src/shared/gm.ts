@@ -111,8 +111,10 @@ export interface GmView {
 export interface GmStatusView {
   /** The open window, if any. */
   open: { id: number; round: number | null; jobs: number } | null
-  /** The round after which the next scheduled window opens; null when trades are closed now. */
+  /** The round after which the next scheduled window opens; null when trades are closed now, or windows open only by hand. */
   nextRound: number | null
+  /** Windows open only from 단장실 (no schedule). */
+  manual: boolean
   canOpen: boolean
   /** Why a window can't open now (a phase, or one already open). */
   blocked: 'phase' | 'open' | 'no-ai' | null

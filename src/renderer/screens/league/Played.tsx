@@ -168,7 +168,8 @@ export function EndDay({ session, games, onClosed, onChanged }: { session: numbe
   const unplayed = games.filter((g) => g.status !== 'final')
   const { config } = league
   const every = config.gm.tradeWindowEveryRounds
-  const windows = config.trades.enabled && config.trades.phases.includes('regular') && league.teams.some((tm) => tm.control === 'ai')
+  // No schedule (every 0): windows open only from 단장실, so closing a day says nothing about them.
+  const windows = every > 0 && config.trades.enabled && config.trades.phases.includes('regular') && league.teams.some((tm) => tm.control === 'ai')
   const tradeWindow: 'now' | number | null = !windows ? null : session % every === 0 ? 'now' : (Math.floor(session / every) + 1) * every
 
   const act = async (fn: () => Promise<void>) => {

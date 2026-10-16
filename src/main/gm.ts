@@ -97,7 +97,9 @@ export class GmService {
     const blocked = w ? 'open' : !this.tradesOpen(db) ? 'phase' : !ai ? 'no-ai' : null
     return {
       open: w ? { id: w.id, round: w.round, jobs: this.jobsFor(db, w.id) } : null,
-      nextRound: this.tradesOpen(db) ? (Math.floor(lastRound / every) + 1) * every : null,
+      // Every 0: windows open only from 단장실.
+      nextRound: this.tradesOpen(db) && every > 0 ? (Math.floor(lastRound / every) + 1) * every : null,
+      manual: every === 0,
       canOpen: blocked === null && (this.ai.fake || this.ai.ready()),
       blocked,
       aiReady: this.ai.fake || this.ai.ready(),
@@ -303,7 +305,9 @@ export class GmService {
   /** After a completed regular-season round: a scheduled window every N rounds. Returns whether one opened. */
   onRound(slug: string, db: Db, folder: string, seasonId: number, round: number): boolean {
     const { config } = loadConfig(db)
-    if (round % config.gm.tradeWindowEveryRounds !== 0 || windowAfterRound(db, seasonId, round)) return false
+    const every = config.gm.tradeWindowEveryRounds
+    // 0: the league opens windows itself, from 단장실.
+    if (every === 0 || round % every !== 0 || windowAfterRound(db, seasonId, round)) return false
     // A window stuck open (its jobs failed) mustn't swallow this round's.
     this.sweep(slug, db, folder)
     if (openWindowRow(db) || !this.tradesOpen(db) || (!this.ai.fake && this.ai.unavailable())) return false
