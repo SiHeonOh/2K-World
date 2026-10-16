@@ -643,8 +643,8 @@ const MAKERS: Record<TopicKind, Maker> = {
       facts: playerFacts(c, r.player_id),
       teams: [c.league.players.get(r.player_id)?.teamId ?? ''],
       players: [r.player_id],
-      // An unhappy player sets off trade talk.
-      market: true,
+      // An unhappy player sets off trade talk, but his own school's card line (as for any planned school) is enough:
+      // the whole league's table is for rumours, the draft and the GMs.
     }
   },
 
