@@ -122,6 +122,11 @@ export function GmSettings() {
             {g.rumorLeaks}
           </Check>
         </Field>
+        <Field label="" help={tg.earlyCautionHelp}>
+          <Check checked={draft.earlyCaution !== false} onChange={(v) => edit((d) => void (d.earlyCaution = v))}>
+            {tg.earlyCaution}
+          </Check>
+        </Field>
       </div>
       {error ? <RuleErrors error={error} /> : null}
       {saved && !dirty && !busy ? <Notice tone="ok">{tg.saved}</Notice> : null}

@@ -319,7 +319,6 @@ export const ko = {
       ratingsHelp: '가중치는 선수 가치 계산에 쓰여요. 0이면 표시만 해요.',
       columnName: '이름',
       label: '표시 이름',
-      labels: '능력치 이름',
       labelsHelp:
         '위키, 선수 표, 로스터 편집, AI가 쓰는 글에 보이는 한국어 이름이에요. 비워 두면 2K 이름을 한국어로 바꿔 보여 줘요(Athleticism → 운동능력). 사전에 없는 이름은 그대로 보여요. 보이는 이름만 바뀌니 언제든 고칠 수 있어요.',
       shownAs: '보이는 이름',

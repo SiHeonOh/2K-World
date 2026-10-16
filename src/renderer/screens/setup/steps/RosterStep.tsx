@@ -1,4 +1,4 @@
-import type { RatingColumn } from '@shared/config/schema'
+import { DEFAULT_VALUE_MODEL, type RatingColumn, type ValueModel } from '@shared/config/schema'
 import { builtInRatingLabel, ratingLabel } from '@shared/labels'
 import type { Edit, WizardState } from '../state'
 import { Check, Field, NumberInput, RowControls, Segmented, Select, TextInput, move } from '../../../components/ui'
@@ -137,13 +137,24 @@ function LabelInput({ col, onChange }: { col: RatingColumn; onChange: (v: string
   )
 }
 
-/** The rating columns' Korean names, for 리그 설정: only what's shown changes, so they can change any time. */
+/**
+ * The rating columns for 리그 설정: their Korean names, their weights in
+ * player value, and how value reads the headline rating (OVR's share, and
+ * how many of a player's best other ratings count). Only what's shown and
+ * how the AI GMs and moods read players change, so any time.
+ */
 export function RatingLabelsCard({ state, edit }: { state: WizardState; edit: Edit }) {
-  const { columns } = state.setup.config.ratings
+  const { columns, overallColumnId, valueModel } = state.setup.config.ratings
+  const tv = t.leagueSettings.value
+  // OVR leads value when it's the headline rating and not shown only (as src/core/value.ts reads it).
+  const overall = columns.find((c) => c.id === overallColumnId && c.weight > 0)
+  const model = { ...DEFAULT_VALUE_MODEL, ...valueModel }
+  const others = columns.filter((c) => c.id !== overall?.id && c.weight > 0).length
+  const setModel = (change: Partial<ValueModel>) => edit((s) => void (s.setup.config.ratings.valueModel = { ...DEFAULT_VALUE_MODEL, ...s.setup.config.ratings.valueModel, ...change }))
   return (
     <div className="card flush">
       <div style={{ padding: '14px 16px 0' }}>
-        <h2>{t.wizard.roster.labels}</h2>
+        <h2>{tv.title}</h2>
         <p className="help">{t.wizard.roster.labelsHelp}</p>
       </div>
       <div className="table-wrap" style={{ marginTop: 10 }}>
@@ -153,6 +164,7 @@ export function RatingLabelsCard({ state, edit }: { state: WizardState; edit: Ed
               <th>{t.wizard.roster.columnName}</th>
               <th>{t.wizard.roster.label}</th>
               <th>{t.wizard.roster.shownAs}</th>
+              <th title={tv.weightHelp}>{t.wizard.roster.weight}</th>
             </tr>
           </thead>
           <tbody>
@@ -163,10 +175,41 @@ export function RatingLabelsCard({ state, edit }: { state: WizardState; edit: Ed
                   <LabelInput col={col} onChange={(v) => edit((s) => void (s.setup.config.ratings.columns[i]!.label = v))} />
                 </td>
                 <td>{ratingLabel(col)}</td>
+                <td>
+                  <NumberInput
+                    compact
+                    ariaLabel={t.app.cellLabel(col.name, t.wizard.roster.weight)}
+                    value={col.weight}
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    onChange={(v) => edit((s) => void (s.setup.config.ratings.columns[i]!.weight = Math.max(0, Math.min(100, v))))}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+      <div style={{ padding: '4px 16px 14px' }}>
+        <p className="help">{tv.weightHelp}</p>
+        <h3>{tv.modelTitle}</h3>
+        <p className="help">{tv.modelHelp}</p>
+        {overall ? (
+          <div className="row" style={{ gap: 16, alignItems: 'flex-end' }}>
+            <Field label={tv.overallShare(ratingLabel(overall))} help={tv.overallShareHelp}>
+              {(id) => <NumberInput id={id} value={Math.round(model.overallShare * 100)} min={0} max={100} step={5} onChange={(v) => setModel({ overallShare: Math.max(0, Math.min(100, Math.round(v))) / 100 })} />}
+            </Field>
+            <Field label={tv.topCategories} help={tv.topCategoriesHelp(others)}>
+              {(id) => <NumberInput id={id} value={model.topCategories} min={1} max={50} onChange={(v) => setModel({ topCategories: Math.max(1, Math.min(50, Math.round(v))) })} />}
+            </Field>
+            <button className="btn small ghost" onClick={() => edit((s) => void delete s.setup.config.ratings.valueModel)}>
+              {tv.defaults}
+            </button>
+          </div>
+        ) : (
+          <p className="help">{tv.noOverall}</p>
+        )}
       </div>
     </div>
   )

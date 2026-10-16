@@ -1,6 +1,6 @@
 import { hash32, rng } from '@core/random'
 import { computeMood, DEFAULT_TRAITS, usageClashes, type Mood, type MoodPart, type Traits } from '@core/mood'
-import { expectedShares, peckingOrder, playerValue, possessions, teamStrength } from '@core/value'
+import { expectedShares, peckingOrder, playerValue, possessions, shareSharpness, teamStrength } from '@core/value'
 import { WANTING_OUT_LINE, type LockerRoomView, type PlayerFeelingsView, type PlayerMoodView } from '@shared/mood'
 import type { LeagueEvent } from '@shared/events'
 import { jsonField, type Db } from '@data/db'
@@ -69,7 +69,7 @@ export function lockerRoom(league: League, teamId: string, feelings: Map<string,
   const order = peckingOrder(valued)
   const starters = config.roster.slots.filter((s) => s.starter).length || 5
   const lore = new Map(roster.map((p) => [p.id, loreOf(league, p.id)]))
-  const shares = expectedShares(valued.map((v) => ({ id: v.id, value: v.value, usage: lore.get(v.id)!.traits.usage })))
+  const shares = expectedShares(valued.map((v) => ({ id: v.id, value: v.value, usage: lore.get(v.id)!.traits.usage })), shareSharpness(config))
 
   // The team's last few games with box scores.
   const games = db

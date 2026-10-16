@@ -24,6 +24,8 @@ interface Name {
   /** What Namuwiki's prose calls that side of a player's game (the writers get these). */
   prose?: string[]
   kind?: SkillKind
+  /** Shooting from outside, the spacing a lineup needs: a 3-point rating, or one that takes it in (outside scoring, shooting). */
+  spacing?: 'three' | 'outside'
 }
 
 /**
@@ -33,11 +35,11 @@ interface Name {
 const RATINGS: [string[], Name][] = [
   [['ovr', 'overall', 'overallrating', 'ovrrating', '오버롤'], { label: '종합', prose: ['종합 능력치', '오버롤'] }],
   [['insidescoring', 'inside', 'insidescore', 'interiorscoring', 'insideoffense'], { label: '골밑 득점', prose: ['골밑 마무리', '림 어택', '포스트업'], kind: 'inside' }],
-  [['outsidescoring', 'outside', 'outsidescore', 'perimeterscoring'], { label: '외곽 득점', prose: ['외곽 슛'], kind: 'shoot' }],
+  [['outsidescoring', 'outside', 'outsidescore', 'perimeterscoring'], { label: '외곽 득점', prose: ['외곽 슛'], kind: 'shoot', spacing: 'outside' }],
   [['midrange', 'mid', 'midrangeshot', 'midrangeshooting', 'mrshot'], { label: '중거리 슛', prose: ['미드레인지 점퍼', '풀업 점퍼'], kind: 'shoot' }],
   [
     ['3pt', '3p', '3pts', 'three', 'threes', '3point', 'threepoint', '3ptshot', 'threepointshot', '3pointshot', '3ptshooting', 'threepointshooting'],
-    { label: '3점 슛', prose: ['외곽 슛', '캐치 앤 샷'], kind: 'shoot' },
+    { label: '3점 슛', prose: ['외곽 슛', '캐치 앤 샷'], kind: 'shoot', spacing: 'three' },
   ],
   [
     ['insided', 'insidedefense', 'interiord', 'interiordefense', 'intd', 'paintdefense', 'postdefense'],
@@ -52,7 +54,7 @@ const RATINGS: [string[], Name][] = [
   // "BQ" is 2K's own word; written in Korean, as the user asked for less English.
   [['bq', 'basketballiq', 'biq', 'iq', 'bballiq'], { label: '농구 센스', prose: ['판단력', '위치 선정'], kind: 'mind' }],
   [['defense', 'defence', 'def', 'defending'], { label: '수비', kind: 'perimeter' }],
-  [['shooting', 'shot', 'shoot'], { label: '슈팅', kind: 'shoot' }],
+  [['shooting', 'shot', 'shoot'], { label: '슈팅', kind: 'shoot', spacing: 'outside' }],
   [['scoring', 'offense', 'offence'], { label: '득점력', kind: 'inside' }],
   [['passing', 'pass', 'passaccuracy', 'passingaccuracy'], { label: '패스', prose: ['패싱 센스', '시야'], kind: 'play' }],
   [['ballhandle', 'ballhandling', 'handle', 'handles', 'dribbling', 'dribble'], { label: '볼 핸들링', kind: 'play' }],
@@ -105,6 +107,11 @@ export function ratingProse(column: Pick<RatingColumn, 'name'>): string[] {
 /** The side of the game a rating column measures, by the dictionary; null when it doesn't know the column. */
 export function ratingKind(column: Pick<RatingColumn, 'name'>): SkillKind | null {
   return RATING_BY_KEY.get(nameKey(column.name))?.kind ?? null
+}
+
+/** Whether a rating measures shooting from outside (the floor spacing a lineup needs): 'three' for a 3-point rating, 'outside' for a broader one; null otherwise. */
+export function ratingSpacing(column: Pick<RatingColumn, 'name'>): 'three' | 'outside' | null {
+  return RATING_BY_KEY.get(nameKey(column.name))?.spacing ?? null
 }
 
 /** Whether a label is Korean to read (written prose only uses those; an untranslated "Clutch" stays out of it). */

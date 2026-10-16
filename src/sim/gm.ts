@@ -4,21 +4,33 @@ import { hash32, rng } from '@core/random'
 import {
   candidates,
   cardValue,
+  caution,
+  cautionBar,
   consolidationBy,
   counters,
   dealStillOpen,
+  draftAfter,
+  draftOutlook,
   isBlockbuster,
   LOPSIDED_GAP,
   moveWish,
+  roleNews,
   scoreDeal,
+  standingOf,
   strengthNow,
+  versusAsk,
+  type AskDiff,
   type Deal,
   type Market,
   type MarketPlayer,
   type MarketTeam,
   type Scored,
+  type Stance,
 } from '@core/market'
-import { expectedShares, peckingOrder, playerValue } from '@core/value'
+import { seasonForms, type Form } from '@core/form'
+import { playerRoles, type Role } from '@core/roles'
+import { columnFor, seasonTotals } from '@core/stats'
+import { expectedShares, peckingOrder, playerValue, shareSharpness } from '@core/value'
 import { playerTradesOpen, type TradeItem } from '@core/trades'
 import { loreBlock } from '@lore/folder'
 import type { GmLore } from '@lore/parse'
@@ -38,6 +50,7 @@ import {
   getNegotiation,
   getWindow,
   listNegotiations,
+  listSteps,
   memoryOf,
   saveMemory,
   stepSaved,
@@ -48,7 +61,7 @@ import {
 import { appendEvent, currentSeason, listPlayers, listTeams, loadConfig } from '@data/league'
 import { applyTrade, listCards, seasonBlockbusters, tradeContext } from '@data/moves'
 import { RuleError } from '@data/rules'
-import { standings } from '@data/season'
+import { seasonBoxLines, standings } from '@data/season'
 import { readLeague, said, short, type League } from '@story/context'
 import { loreOf, relationTarget } from '@story/mood'
 import { tradeRequests } from '@story/reactions'
@@ -81,6 +94,8 @@ const TRAIT_KO: Record<string, string> = {
   ego: '체면',
 }
 const BAND_KO: Record<string, string> = { happy: '행복', content: '만족', neutral: '보통', unhappy: '불만', boiling: '폭발 직전' }
+const STANCE_KO: Record<Stance, string> = { contender: '경쟁권', bubble: '중위권', rebuilding: '리빌딩' }
+const ROLE_KO: Record<Role, string> = { handler: '볼 핸들러', big: '골밑·리바운드 빅맨', shooter: '외곽 슈터', stopper: '외곽 수비수' }
 
 // ── The market, read from the league ─────────────────────────────────────
 
@@ -97,6 +112,8 @@ export interface MarketData {
   ovr: (playerId: string) => number | null
   /** GM leanings and lore, per team. */
   gm: (teamId: string) => { name: string; lore: GmLore | null }
+  /** This regular season's line for players with enough games (src/core/form.ts), with rebounds and assists a game when tracked. */
+  forms?: Map<string, Form & { rpg: number | null; apg: number | null }>
 }
 
 function gmLore(league: League, teamId: string): GmLore | null {
@@ -104,13 +121,42 @@ function gmLore(league: League, teamId: string): GmLore | null {
   return e?.kind === 'gm' ? e.settings : null
 }
 
-/** The market as code sees it now: values, moods, locks, tradable cards, leanings and the standings. */
+/**
+ * This regular season's form for every player with enough box lines (his
+ * points, efficiency and what his value predicts), with rebounds and assists
+ * a game for the GMs' reports. Empty when the league tracks no points.
+ */
+function formsOf(league: League, seasonId: number, values: Map<string, number>): NonNullable<MarketData['forms']> {
+  const { config } = league
+  const col = (meaning: Parameters<typeof columnFor>[1]) => columnFor(config, meaning)
+  const pts = col('points')
+  if (!pts) return new Map()
+  const [fga, fta, reb, ast] = [col('fga'), col('fta'), col('rebounds'), col('assists')]
+  const totals = seasonTotals(seasonBoxLines(league.db, seasonId))
+  const lines = new Map(
+    [...totals].map(([id, t]) => [id, { games: t.games, points: t.totals[pts] ?? 0, shots: fga ? (t.totals[fga] ?? 0) + 0.44 * (fta ? (t.totals[fta] ?? 0) : 0) : null }]),
+  )
+  const per = (id: string, c: string | null) => {
+    const t = totals.get(id)
+    return c && t && t.games > 0 ? Math.round(((t.totals[c] ?? 0) / t.games) * 10) / 10 : null
+  }
+  return new Map([...seasonForms(lines, values)].map(([id, f]) => [id, { ...f, rpg: per(id, reb), apg: per(id, ast) }]))
+}
+
+/**
+ * The market as code sees it now: values (with season form), the roles each
+ * player covers, moods, locks, tradable cards, leanings, the standings, each
+ * team's record and cards issued, and how far the regular season is.
+ */
 export function readMarket(league: League): MarketData {
   const { db, config } = league
   const season = currentSeason(db)
   const roster = listPlayers(db)
   const teams = listTeams(db)
   const ctx = tradeContext(db)
+  const table = standings(db)
+  const values = new Map(roster.map((p) => [p.id, playerValue(config, p.ratings)]))
+  const forms = formsOf(league, season.id, values)
   const bands = new Map(
     (
       db
@@ -133,13 +179,20 @@ export function readMarket(league: League): MarketData {
   const given = (team: string) => ctx.cardTradeCounts.get(team)?.given ?? 0
   // What the in-season cap leaves each team to give: a package never goes past it.
   const capped = inSeason && cap !== null
-  const ranking = standings(db).overall.map((s) => s.teamId)
+  const ranking = table.overall.map((s) => s.teamId)
+  const record = new Map(table.overall.map((s) => [s.teamId, { wins: s.wins, losses: s.losses }]))
   const overallId = config.ratings.overallColumnId
   const leaning = (teamId: string): MarketTeam['leaning'] => {
     const g = gmLore(league, teamId)
     return { philosophy: g?.philosophy ?? 'balanced', traits: { ...(g?.traits ?? {}) } }
   }
   const held = listCards(db, season.id).filter((c) => c.status === 'held')
+  // This season's cards already handed to each team (the guaranteed tier, all of them after the playoffs).
+  const issued = new Map(
+    (db.prepare('SELECT original_team_id, MAX(number) AS n FROM cards WHERE issued_season_id = ? GROUP BY original_team_id').all(season.id) as { original_team_id: string; n: number }[]).map(
+      (r) => [r.original_team_id, r.n],
+    ),
+  )
   const seasonLabel = db.prepare('SELECT label FROM seasons WHERE id = ?')
   const market: Market = {
     config,
@@ -149,12 +202,16 @@ export function readMarket(league: League): MarketData {
       leaning: leaning(t.id),
       tradable: t.control === 'ai',
       ...(capped ? { cardRoom: Math.max(0, cap - given(t.id)) } : {}),
+      ...(record.has(t.id) ? { record: record.get(t.id)! } : {}),
+      ...(draft ? { issued: issued.get(t.id) ?? 0 } : {}),
     })),
     players: roster.map((p) => ({
       id: p.id,
       teamId: p.teamId,
       slotId: p.slotId,
-      value: playerValue(config, p.ratings),
+      // His ratings' value, nudged by a season clearly above or below it.
+      value: Math.round((values.get(p.id)! + (forms.get(p.id)?.delta ?? 0)) * 10) / 10,
+      roles: playerRoles(config, p.slotId, p.ratings),
       unhappy: ['unhappy', 'boiling'].includes(bands.get(p.id) ?? '') || requests.has(p.id),
       // A sour mood or a request is as keen as it gets (as before); lasting wanting out counts by how
       // much once it's real (30+), so a player who's been unhappy for weeks is on the table even on a good day.
@@ -175,12 +232,14 @@ export function readMarket(league: League): MarketData {
       tradable: cardsOk && (!inSeason || cap === null || (draft?.cardTrades.capCounts === 'given' && given(c.ownerTeamId) < cap)),
     })),
     ranking,
+    season: { phase: season.phase, played: table.played, total: table.total },
   }
   return {
     market,
     bands,
     requests,
     feelings,
+    forms,
     // As the screens name them: 가람고 1번 카드, and the season it came from when that's another.
     cardNames: new Map(
       held.map((c) => {
@@ -199,10 +258,17 @@ export function readMarket(league: League): MarketData {
   }
 }
 
+/** How much less eager every GM is at full early-season caution (motivation), and the share of turns it takes away. */
+const CAUTION_EAGERNESS = 1
+const CAUTION_TURNS = 0.6
+
 /**
  * Who gets a turn: unhappy players to move, a weak starter, where the team
- * stands against its philosophy, a GM's appetite for risk (less with
- * patience), how good its best option is, and a little chance.
+ * stands against its philosophy (a contender that wants to win now, a
+ * rebuilding developer, any bubble team), a GM's appetite for risk (less
+ * with patience), how good its best option is, and a little chance. Early in
+ * the regular season (caution) every GM is less eager, one with nothing
+ * pressing sits it out, and fewer get a turn.
  */
 export function motivatedGms(data: MarketData, count: number, seed: string, skip: Set<string>): { teamId: string; options: Scored[] }[] {
   const { market } = data
@@ -218,34 +284,37 @@ export function motivatedGms(data: MarketData, count: number, seed: string, skip
     )
     return values.reduce((s, v) => s + v, 0) / Math.max(1, values.length)
   })()
-  const n = market.ranking.length
+  const careful = caution(market)
+  const turns = Math.max(1, Math.round(count * (1 - CAUTION_TURNS * careful)))
   const rough: { team: MarketTeam; score: number }[] = []
   for (const t of market.teams) {
     if (!t.tradable || skip.has(t.id)) continue
     const mine = market.players.filter((p) => p.teamId === t.id).sort((a, b) => b.value - a.value)
     const weakest = mine.slice(0, starters).at(-1)?.value ?? leagueStarter
-    const rank = market.ranking.indexOf(t.id)
-    const top = rank >= 0 && rank < n / 4
-    const bottom = rank >= 0 && rank >= (3 * n) / 4
+    const stance = standingOf(market, t.id).stance
     const p = t.leaning.philosophy
     let score = 1.5 * mine.reduce((s, x) => s + moveWish(x), 0)
-    score += Math.max(0, (leagueStarter - weakest) / 10)
-    score += (top && p === 'win-now') || (bottom && p === 'development') ? 1 : 0.3
+    // In value points: OVR-led values sit closer together than the old average of every rating did (÷10 then).
+    score += Math.max(0, (leagueStarter - weakest) / 7)
+    score += (stance === 'contender' && p === 'win-now') || (stance === 'rebuilding' && p === 'development') ? 1 : stance === 'bubble' ? 0.6 : 0.3
     score += ((t.leaning.traits.risk ?? 3) - 3) * 0.3 - ((t.leaning.traits.patience ?? 3) - 3) * 0.2
     score += random() * 0.5
+    score -= CAUTION_EAGERNESS * careful
+    // Nothing pressing early on (the bar rises with the caution, from nothing at all): it sits the window out.
+    if (careful > 0 && score <= careful - 1) continue
     rough.push({ team: t, score })
   }
   // The full search (every deal with every partner) goes down the list only until enough GMs have
   // something to offer (plus a few to choose from), so opening a window stays quick.
   const out: { teamId: string; options: Scored[]; score: number }[] = []
   for (const r of rough.sort((a, b) => b.score - a.score)) {
-    if (out.length >= count + 4) break
+    if (out.length >= turns + 4) break
     const options = candidates(market, r.team.id, 6)
     if (options.length > 0) out.push({ teamId: r.team.id, options, score: r.score + 0.5 * Math.max(0, options[0]!.ua) })
   }
   return out
     .sort((a, b) => b.score - a.score)
-    .slice(0, count)
+    .slice(0, turns)
     .map(({ teamId, options }) => ({ teamId, options }))
 }
 
@@ -292,7 +361,7 @@ function shapeOf(data: MarketData, s: Scored, side: 'a' | 'b'): string {
   return parts.length ? ` [${parts.join(' · ')}]` : ''
 }
 
-/** One deal, from one team's side: its shape, what goes, what comes, the cards' worth, and what it does to both teams. */
+/** One deal, from one team's side: its shape, what goes, what comes, the cards' worth, what it does to both teams, and to our lineup's roles and draft protection. */
 function dealLine(league: League, data: MarketData, s: Scored, side: 'a' | 'b'): string {
   const d = s.deal
   const other = side === 'a' ? d.b : d.a
@@ -302,12 +371,47 @@ function dealLine(league: League, data: MarketData, s: Scored, side: 'a' | 'b'):
   const me = side === 'a' ? s.a : s.b
   const them = side === 'a' ? s.b : s.a
   const cards = me.cardsIn || me.cardsOut ? ` · 카드 가치 합 받음 ${round1(me.cardsIn)}, 줌 ${round1(me.cardsOut)}` : ''
-  return `${short(league, other)}와${shapeOf(data, s, side)}: 우리가 ${out.join(' + ')} 주고 ← ${incoming.join(' + ')} 받음${cards} · 우리 전력 ${round1(me.before)}→${round1(me.after)} (${signed(me.after - me.before)}) · ${short(league, other)} 전력 ${round1(them.before)}→${round1(them.after)}`
+  const fit = fitNotes(league, data, s, side)
+  return `${short(league, other)}와${shapeOf(data, s, side)}: 우리가 ${out.join(' + ')} 주고 ← ${incoming.join(' + ')} 받음${cards} · 우리 전력 ${round1(me.before)}→${round1(me.after)} (${signed(me.after - me.before)}) · ${short(league, other)} 전력 ${round1(them.before)}→${round1(them.after)}${fit.length ? ` · ${fit.join(' · ')}` : ''}`
+}
+
+const roleLost = (r: Role) => `이 거래 뒤 ${ROLE_KO[r]} ${r === 'shooter' ? '부족(3점 B 이상 둘 미만)' : '없음'}`
+const names = (league: League, ids: readonly string[]) => ids.map((id) => name(league, id)).join(', ')
+
+/**
+ * What a deal does for our side past strength: core roles our lineup loses
+ * or fills, and players of ours the draft would find unprotected that it
+ * wouldn't now (a card given away, or a star we couldn't cover).
+ */
+function fitNotes(league: League, data: MarketData, s: Scored, side: 'a' | 'b'): string[] {
+  const me = side === 'a' ? s.a : s.b
+  const team = side === 'a' ? s.deal.a : s.deal.b
+  const { lost, filled } = roleNews(data.market, me)
+  const out = [...lost.map(roleLost), ...filled.map((r) => `빈자리 채움: ${ROLE_KO[r]}`)]
+  const draft = me.draft ?? draftAfter(data.market, s.deal, team)
+  if (draft) {
+    const now = new Set(draftOutlook(data.market, team)?.exposed ?? [])
+    const fresh = draft.exposed.filter((id) => !now.has(id))
+    const covered = [...now].filter((id) => draft.need.includes(id) && !draft.exposed.includes(id))
+    if (fresh.length) out.push(`이 거래 뒤 못 지키는 선수: ${names(league, fresh)} (드래프트 예상 카드 ${draft.cards}장 → ${draft.cardsAfter}장)`)
+    if (covered.length) out.push(`이 거래로 드래프트에서 지킬 수 있게 됨: ${names(league, covered)}`)
+  }
+  return out
+}
+
+/** His season line for a GM: games, averages, true shooting and against what his value predicts. Empty without enough games. */
+function seasonLine(data: MarketData, id: string): string {
+  const f = data.forms?.get(id)
+  if (!f) return ''
+  const per = [`${f.ppg}점`, f.rpg !== null ? `${f.rpg}리바` : '', f.apg !== null ? `${f.apg}어시` : ''].filter(Boolean).join(' ')
+  const ts = f.ts !== null ? ` · TS ${(f.ts * 100).toFixed(1)}%` : ''
+  const vs = f.delta > 0 ? ` · 가치로 본 기대 ${f.expected}점보다 잘함(가치 +${f.delta})` : f.delta < 0 ? ` · 가치로 본 기대 ${f.expected}점에 못 미침(가치 ${f.delta})` : ''
+  return `${f.games}경기 평균 ${per}${ts}${vs}`
 }
 
 /**
  * Our pecking order after a deal (by value, as code ranks it), with each
- * player's expected share of the team's shots then (value squared and his
+ * player's expected share of the team's shots then (by value and his
  * appetite for the ball), and now for those who stay: a star coming in
  * takes shots from everyone.
  */
@@ -318,7 +422,7 @@ function orderLine(league: League, data: MarketData, s: Scored, side: 'a' | 'b',
   const incoming = new Set(side === 'a' ? d.bGives : d.aGives)
   const now = data.market.players.filter((p) => p.teamId === teamId)
   const after = [...now.filter((p) => !out.has(p.id)), ...data.market.players.filter((p) => incoming.has(p.id))]
-  const shares = (list: MarketPlayer[]) => expectedShares(list.map((p) => ({ id: p.id, value: p.value, usage: loreOf(league, p.id).traits.usage })))
+  const shares = (list: MarketPlayer[]) => expectedShares(list.map((p) => ({ id: p.id, value: p.value, usage: loreOf(league, p.id).traits.usage })), shareSharpness(league.config))
   const was = shares(now)
   const will = shares(after)
   const pct = (x: number | undefined) => `${Math.round((x ?? 0) * 100)}%`
@@ -358,13 +462,20 @@ function teamBlock(league: League, data: MarketData, teamId: string): string {
   const mem = memoryOf(league.db, teamId)
   const lines = [
     `## 우리 팀: ${short(league, teamId)} · ${line ? `${line.wins}승 ${line.losses}패, 순위 ${rank}/${view.overall.length}` : '시즌 전'} · 전력 ${round1(strength(teamId))} (리그 ${sRank}위)`,
-    ...roster.map(
-      (p) =>
-        `- ${playerLabel(league, data, p.id, true)} · 가치 ${round1(p.value)}${p.locked ? ' · 이번 시즌 이미 트레이드됨(못 보냄)' : ''}${data.requests.has(p.id) ? (data.requests.get(p.id) === 'public_request' ? ' · 공개 트레이드 요청' : ' · 비공개로 트레이드 요청') : ''}${feelingTags(data.feelings.get(p.id))}`,
-    ),
+    standingLine(league, data, teamId),
+    ...roster.map((p) => {
+      const form = seasonLine(data, p.id)
+      return `- ${playerLabel(league, data, p.id, true)} · 가치 ${round1(p.value)}${roleTags(p)}${p.locked ? ' · 이번 시즌 이미 트레이드됨(못 보냄)' : ''}${data.requests.has(p.id) ? (data.requests.get(p.id) === 'public_request' ? ' · 공개 트레이드 요청' : ' · 비공개로 트레이드 요청') : ''}${feelingTags(data.feelings.get(p.id))}${form ? ` · 시즌 ${form}` : ''}`
+    }),
   ]
   const cards = market.cards.filter((c) => c.ownerTeamId === teamId)
   if (cards.length) lines.push(`카드: ${cards.map((c) => `${cardLabel(league, data, c.id)}${c.tradable ? '' : ' (지금은 못 보냄)'}`).join(', ')}`)
+  const outlook = draftOutlook(market, teamId)
+  if (outlook) {
+    lines.push(
+      `드래프트 예상 카드 ${outlook.cards}장(지금 가진 카드 + 지금 순위로 시즌 끝에 더 받을 카드) · 지킬 선수 ${outlook.need.length}명${outlook.need.length ? `(${names(league, outlook.need)})` : ''}${outlook.exposed.length ? ` · 지금도 못 지키는 선수: ${names(league, outlook.exposed)}` : ''}. 카드를 다 내주면 드래프트에서 이 선수들을 지키지 못해 다른 학교가 데려갈 수 있다.`,
+    )
+  }
   if (mem.plan) lines.push(`지난 계획: ${mem.plan.stance ?? ''} · ${said(mem.plan.note, 120)}`)
   if (mem.notes.length) lines.push(`최근 결정: ${mem.notes.slice(-3).map((n) => said(n, 100)).join(' / ')}`)
   const trust = Object.entries(mem.trust).filter(([, v]) => v !== 0)
@@ -372,7 +483,19 @@ function teamBlock(league: League, data: MarketData, teamId: string): string {
   return lines.join('\n')
 }
 
-/** What every GM in a window knows about the league: the table and who's visibly unhappy. */
+/** A player's core roles on his own GM's roster (볼 핸들러, 빅맨…). */
+const roleTags = (p: MarketPlayer) => (p.roles?.length ? ` · ${p.roles.map((r) => ROLE_KO[r]).join('·')}` : '')
+
+/** Where the team stands (경쟁권 / 중위권 / 리빌딩), why, and which way it leans its GM now. */
+function standingLine(league: League, data: MarketData, teamId: string): string {
+  const s = standingOf(data.market, teamId)
+  const group = league.config.season.playoffs.bracket === 'conference' && league.config.structure.conferences.length > 0 ? '컨퍼런스' : '리그'
+  const lines = `플레이오프 직행 ${s.line}위${s.playIn > s.line ? `·플레이인 ${s.playIn}위` : ''}까지`
+  const lean = s.lean >= 0.3 ? ' · 그래서 지금은 당장 전력 쪽으로 기운다' : s.lean <= -0.3 ? ' · 그래서 지금은 카드와 앞날 쪽으로 기운다' : ''
+  return `우리 팀: ${STANCE_KO[s.stance]} (${group} 순위 ${s.rank}/${s.size}, ${lines} · ${group} 전력 순위 ${s.strengthRank}위${lean})`
+}
+
+/** What every GM in a window knows about the league: the table, who's visibly unhappy, the rules, and how early in the season it is. */
 function marketBlock(league: League, data: MarketData, round: number | null): string {
   const view = standings(league.db)
   // A private trade request is between a player and his own GM: only moods and public requests are known.
@@ -383,6 +506,11 @@ function marketBlock(league: League, data: MarketData, round: number | null): st
     `순위 상위: ${view.overall.slice(0, 6).map((s, i) => `${i + 1}. ${short(league, s.teamId)} ${s.wins}-${s.losses}`).join(', ')}`,
     `순위 하위: ${view.overall.slice(-6).map((s) => `${short(league, s.teamId)} ${s.wins}-${s.losses}`).join(', ')}`,
   ]
+  const careful = caution(data.market)
+  if (careful > 0) {
+    const pct = view.total > 0 ? Math.round((view.played / view.total) * 100) : 0
+    lines.push(`시즌 초반: 정규시즌 경기의 ${pct}%만 치렀다. 몇 경기로 팀을 판단하기 이르니, 단장들은 섣불리 바꾸지 않고 확실히 좋은 거래만 한다 (효용 ${cautionBar(data.market)} 이상이 기준).`)
+  }
   if (unhappy.length) lines.push(`불만이 소문난 선수: ${unhappy.slice(0, 12).map((p) => playerLabel(league, data, p.id, false)).join(', ')}`)
   const asking = [...data.requests].filter(([, a]) => a === 'public_request').map(([id]) => id)
   if (asking.length) lines.push(`공개적으로 트레이드를 요청한 선수: ${asking.slice(0, 12).map((id) => playerLabel(league, data, id, false)).join(', ')}`)
@@ -473,8 +601,14 @@ export interface GmRespondInput {
   trust: number
 }
 
-function report(s: Scored, side: 'a' | 'b'): ValueReport {
+/** What one side saw, in numbers from code: strength, cards, raw gain, its utility, where it stands, its draft protection and roles after the deal, and the early-season bar. */
+function report(data: MarketData, s: Scored, side: 'a' | 'b'): ValueReport {
   const e = side === 'a' ? s.a : s.b
+  const team = side === 'a' ? s.deal.a : s.deal.b
+  const m = data.market
+  const { lost, filled } = roleNews(m, e)
+  const draft = e.draft ?? draftAfter(m, s.deal, team)
+  const bar = cautionBar(m)
   return {
     strengthBefore: round1(e.before),
     strengthAfter: round1(e.after),
@@ -482,7 +616,36 @@ function report(s: Scored, side: 'a' | 'b'): ValueReport {
     cardsOut: round1(e.cardsOut),
     gain: round1(side === 'a' ? s.gap : -s.gap),
     utility: side === 'a' ? s.ua : s.ub,
+    stance: standingOf(m, team).stance,
+    ...(draft ? { draft: { cards: draft.cards, cardsAfter: draft.cardsAfter, need: draft.need, exposed: draft.exposed } } : {}),
+    ...(lost.length ? { rolesLost: lost } : {}),
+    ...(filled.length ? { rolesFilled: filled } : {}),
+    ...(bar > 0 ? { bar } : {}),
   }
+}
+
+/** A report's draft and role lines for the GM reading it ("드래프트 예상 카드 1장 · 지킬 선수 2명 · 이 거래 뒤 못 지키는 선수: 김하람"). */
+function reportLines(league: League, r: ValueReport): string[] {
+  const out: string[] = []
+  if (r.draft) {
+    const d = r.draft
+    out.push(
+      `드래프트 예상 카드 ${d.cardsAfter}장${d.cardsAfter !== d.cards ? `(거래 전 ${d.cards}장)` : ''} · 지킬 선수 ${d.need.length}명${d.need.length ? `(${names(league, d.need)})` : ''}${d.exposed.length ? ` · 이 거래 뒤 못 지키는 선수: ${names(league, d.exposed)}` : ''}`,
+    )
+  }
+  const roles = [...(r.rolesLost ?? []).map((x) => roleLost(x as Role)), ...(r.rolesFilled ?? []).map((x) => `빈자리 채움: ${ROLE_KO[x as Role]}`)]
+  if (roles.length) out.push(`역할: ${roles.join(' · ')}`)
+  if (r.bar) out.push(`시즌 초반이라 이 거래의 효용이 ${r.bar} 이상은 돼야 확실히 좋은 거래다 (지금 ${signed(r.utility)}).`)
+  return out
+}
+
+/** A counter against the proposer's own ask: whom it asked for and got instead, and what that changes. */
+function askLine(league: League, d: AskDiff): string {
+  const swap = d.dropped.length ? `원했던 ${names(league, d.dropped)} 대신 ${d.added.length ? names(league, d.added) : '없이'}` : d.added.length ? `원했던 선수에 ${names(league, d.added)}까지` : '받는 선수는 원했던 그대로'
+  const ours = d.spared.length || d.extra.length ? ` · 우리가 보내는 쪽: ${d.spared.length ? `${names(league, d.spared)} 대신 ` : ''}${d.extra.length ? names(league, d.extra) : '덜 보냄'}` : ''
+  const roles = d.roles.length ? ` · 원안과 달리 ${d.roles.map((r) => roleLost(r).replace('이 거래 뒤 ', '')).join(', ')}` : ''
+  const exposed = d.exposed.length ? ` · 원안과 달리 드래프트에서 못 지키는 선수: ${names(league, d.exposed)}` : ''
+  return `처음 원했던 거래와 비교(코드가 계산): ${swap}: 가치 ${signed(d.value)}, 전력 ${signed(d.strength)}${ours}${roles}${exposed} · 우리 효용 ${signed(d.utility)}`
 }
 
 /** The receiver's answer, or the proposer's last word on a counter. Counters come from code, from the proposer's side. */
@@ -494,14 +657,29 @@ export function respondInput(league: League, data: MarketData, n: NegotiationRow
   const counterList = final ? [] : counters(data.market, n.deal, 4)
   const trust = memoryOf(league.db, teamId).trust[otherId] ?? 0
   const other = data.gm(otherId)
-  const r = report(offer, side)
+  const r = report(data, offer, side)
+  // The proposer's last word is weighed against what it first asked for.
+  const asked = final ? (listSteps(league.db, n.id).find((x) => x.action === 'offer')?.deal ?? null) : null
+  const diff = asked ? versusAsk(data.market, asked, n.deal) : null
+  if (diff) r.versusAsk = { dropped: diff.dropped, added: diff.added, value: diff.value, strength: diff.strength }
+  const moved = [...n.deal.aGives, ...n.deal.bGives].flatMap((id) => {
+    const line = seasonLine(data, id)
+    return line ? [`${name(league, id)} ${line}`] : []
+  })
   const blocks = [
     personaBlock(league, data, teamId),
     teamBlock(league, data, teamId),
     `# ${final ? '상대의 역제안' : '받은 제안'} (${said(other.name, 30)}, ${short(league, otherId)} · 협상 스타일 ${NEGOTIATION_KO[other.lore?.negotiation ?? 'fair']} · 우리 신뢰 ${trust})`,
     `메시지: ${said(message, 600)}`,
     `내용: ${dealLine(league, data, offer, side)}`,
-    `가치 보고서(우리 쪽, 코드가 계산): 전력 ${r.strengthBefore}→${r.strengthAfter} (${signed(r.strengthAfter - r.strengthBefore)})${r.cardsIn || r.cardsOut ? ` · 카드 가치 들어옴 ${r.cardsIn}, 나감 ${r.cardsOut}` : ''} · 받는 가치 - 주는 가치 ${signed(r.gain)}`,
+    [
+      `가치 보고서(우리 쪽, 코드가 계산): 전력 ${r.strengthBefore}→${r.strengthAfter} (${signed(r.strengthAfter - r.strengthBefore)})${r.cardsIn || r.cardsOut ? ` · 카드 가치 들어옴 ${r.cardsIn}, 나감 ${r.cardsOut}` : ''} · 받는 가치 - 주는 가치 ${signed(r.gain)} · 우리 효용 ${signed(r.utility)}`,
+      ...reportLines(league, r),
+      diff ? askLine(league, diff) : '',
+      moved.length ? `이번 시즌 기록(거래 선수, 코드가 계산): ${moved.join(' / ')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
     `거래 뒤 우리 서열과 기대 슛 비중(코드가 계산, 괄호는 지금): ${orderLine(league, data, offer, side)}`,
     counterList.length
       ? `# 역제안 후보 (counter를 고르면 이 중 기호만)\n${counterList.map((c, i) => `C${i + 1} · ${dealLine(league, data, c, 'b')} · 거래 뒤 우리 서열과 슛 비중: ${orderLine(league, data, c, 'b', 3)}`).join('\n')}`
@@ -539,6 +717,7 @@ export const GM_STYLE = `너는 한국 고교 농구 리그 학교들의 단장(
 규칙:
 - 모두 한국어로 쓴다. 단장끼리는 업무상 존댓말이 기본이지만, 협상 스타일과 성격이 말투에 드러난다: 공정은 차분하고 합리적으로, 강경은 퉁명스럽고 물러서지 않게, 허세는 다른 팀도 관심 있다는 식으로 부풀리며(자료에 없는 사실을 사실처럼 말하진 않는다), 호구는 쉽게 흔들리게.
 - 판단은 그 단장의 운영 철학, 성향 수치, 지난 계획, 신뢰, 선수들의 기분을 따른다. 숫자는 코드가 계산한 것을 믿는다. 직접 계산하지 않는다.
+- 역제안은 처음 원했던 것과 우리 팀에 필요한 것에 견주어 판단한다. 조금 이득이라는 이유만으로 받지 않는다.
 - 고를 수 있는 것은 자료에 적힌 기호(O1, C1 등)뿐이다. 목록에 없는 거래를 만들어 내지 않는다.
 - 기호는 offer와 counter 칸에만 쓴다. 메시지, 속마음, 계획에는 기호 대신 선수 이름과 내용으로 쓴다.
 - 메시지는 상대 단장에게 실제로 보내는 말이다. 속마음(note)은 상대가 절대 못 보는 솔직한 이유다. 둘이 달라도 된다.
@@ -548,19 +727,23 @@ export const GM_STYLE = `너는 한국 고교 농구 리그 학교들의 단장(
 /** How stars change teams: every GM is told, whatever guide the league uses. */
 const SHAPES = `스타가 팀을 옮기는 길은 1대1만이 아니다. 패키지("주전 + 카드")와 통합("에이스 + 벤치 ↔ 주전 둘")도 평범한 방식이다. 이런 거래는 숫자 하나로 정하지 말고 우리 팀에 맞는지(거래 뒤 서열, 슛 비중, 빈자리)와 운영 철학(당장 우승이면 지금 전력, 육성이면 카드와 앞날)으로 판단한다.`
 
+/** What a real front office weighs past strength: every GM is told, whatever guide the league uses. */
+const NEEDS = `코드의 자료에는 숫자 말고도 판단할 것이 있다: 드래프트 예상 카드와 지킬 선수(카드를 다 내주면 드래프트에서 에이스를 지키지 못해 다른 학교가 데려간다), 거래 뒤 빈 역할(볼 핸들러, 골밑 빅맨, 외곽 슈터, 외곽 수비수), 우리 팀 위치(경쟁권·중위권·리빌딩: 성적이 안 나는 팀은 시즌이 깊을수록 앞날을, 경쟁권 팀은 지금 전력을 본다), 시즌 초반의 신중함. 불만 선수는 사는 쪽이 덜 쳐주고 파는 쪽도 덜 받는다.`
+
 const INTENT_INSTRUCTIONS = `이번 트레이드 창에서 자료의 각 단장(T1, T2…)이 무엇을 할지 정한다. gms에 단장마다 하나씩.
 - 단장마다 아는 것은 공통 자료(리그와 시장)와 자기 팀 자료뿐이다. 다른 단장 블록에 적힌 것(비공개 트레이드 요청, 속사정)은 모르는 일로 친다.
 - stance: buy(보강) / sell(정리) / hold(관망). 팀 성적, 철학, 불만 선수에 맞게.
 - offer: 던질 제안 하나(O1 등), 마땅치 않으면 null. 모든 단장이 제안할 필요는 없다. 인내심이 강하거나 지금이 만족스러우면 관망해도 된다.
 - ${SHAPES}
+- ${NEEDS}
 - message: 제안할 때 상대 단장에게 보내는 말(2~4문장, 그 단장의 말투로).
 - note: 속마음(1~3문장).
 - quote: 기자에게 흘릴 만한 한마디가 있으면 한 문장, 없으면 null.`
 
 const RESPOND_INSTRUCTIONS = (final: boolean) =>
   final
-    ? `상대가 역제안을 했다. 너는 처음 제안한 단장이다. accept(수락) 또는 reject(거절)만 고른다. 지난 계획과 신뢰, 가치 보고서를 보고 정한다. ${SHAPES}`
-    : `다른 단장의 제안을 받았다. accept(수락), reject(거절), counter(역제안 후보 중 하나) 중에서 고른다. 가치 보고서, 지난 계획, 상대에 대한 신뢰, 협상 스타일을 따른다. 거절도 성격대로. 역제안 후보에는 상대가 카드를 얹는 안도 있다. ${SHAPES}`
+    ? `상대가 역제안을 했다. 너는 처음 제안한 단장이다. accept(수락) 또는 reject(거절)만 고른다. 역제안은 처음 원했던 거래(자료의 "처음 원했던 거래와 비교")와 우리 팀에 필요한 것(빈 역할, 드래프트에서 지킬 선수, 팀 위치)에 견주어 판단한다. 효용이 조금 플러스라는 것만으로 받지 않는다: 원했던 핵심 선수가 빠졌거나, 필요한 역할이 비거나, 지킬 선수를 못 지키게 되면 그만한 대가가 있을 때만 받는다. 지난 계획과 신뢰도 본다. ${NEEDS} ${SHAPES}`
+    : `다른 단장의 제안을 받았다. accept(수락), reject(거절), counter(역제안 후보 중 하나) 중에서 고른다. 가치 보고서, 지난 계획, 상대에 대한 신뢰, 협상 스타일을 따른다. 거절도 성격대로. 역제안 후보에는 상대가 카드를 얹는 안도 있다. ${NEEDS} ${SHAPES}`
 
 // ── Accepting results ────────────────────────────────────────────────────
 
@@ -732,7 +915,7 @@ function acceptIntent(ctx: GmCtx, output: GmIntentOutput, job: JobRow): void {
       const id = createNegotiation(db, input.windowId, asDeal(d), now)
       addStep(
         db,
-        { negotiationId: id, round: 1, teamId: d.a, action: 'offer', deal: asDeal(d), message: oneLine(g.message ?? '', 600), note: oneLine(g.note, 400), report: report(fresh, 'a'), trust: memoryOf(db, d.a).trust[d.b] ?? 0, jobId: job.id },
+        { negotiationId: id, round: 1, teamId: d.a, action: 'offer', deal: asDeal(d), message: oneLine(g.message ?? '', 600), note: oneLine(g.note, 400), report: report(data, fresh, 'a'), trust: memoryOf(db, d.a).trust[d.b] ?? 0, jobId: job.id },
         now,
       )
       addNote(db, d.a, `${short(lg, d.b)}에 트레이드 제안`, now)
@@ -766,7 +949,7 @@ function acceptRespond(ctx: GmCtx, output: GmRespondOutput, job: JobRow): void {
     if (decision === 'counter' && counter) {
       const data = readMarket(lg)
       const s = scoreDeal(data.market, counter.deal)
-      step('counter', asDeal(counter.deal), report(s, 'b'))
+      step('counter', asDeal(counter.deal), report(data, s, 'b'))
       updateNegotiation(db, n.id, { deal: asDeal(counter.deal) })
       ctx.hooks.queue(GM_RESPOND, respondInput(lg, data, getNegotiation(db, n.id)!, input.round + 1, true, message), GM_PRIORITY)
       return
@@ -893,7 +1076,8 @@ export function gmDemo(kind: string, input: unknown): GmIntentOutput | GmRespond
   if (kind === GM_RESPOND) {
     const i = input as GmRespondInput
     if (i.final) return { decision: 'accept', counter: null, message: '좋습니다. 그렇게 하시죠.', note: '조금 손해지만 받아들일 만하다.' }
-    if (i.report.utility >= 0) return { decision: 'accept', counter: null, message: '좋은 제안이네요. 받겠습니다.', note: '우리에게도 이득이다.' }
+    // Early in the season (the report's bar), only a clearly good offer is taken as it is.
+    if (i.report.utility >= (i.report.bar ?? 0)) return { decision: 'accept', counter: null, message: '좋은 제안이네요. 받겠습니다.', note: '우리에게도 이득이다.' }
     if (i.counters[0]) return { decision: 'counter', counter: i.counters[0].key, message: '그대로는 어렵고, 이렇게라면 생각해 보겠습니다.', note: '조금 더 받아내야 한다.' }
     return { decision: 'reject', counter: null, message: '이번엔 어렵겠습니다.', note: '우리만 손해 보는 거래다.' }
   }

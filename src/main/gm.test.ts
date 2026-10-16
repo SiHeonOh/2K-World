@@ -2,12 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { sampleSetup } from '@shared/testing/fixtures'
+import { sampleConfig, sampleSetup, twoKConfig, TWO_K_CATEGORIES } from '@shared/testing/fixtures'
+import type { Player, Team } from '@shared/setup'
 import { defaultCardSwap } from '@shared/config/defaults'
 import type { EventPayloads } from '@shared/events'
 import { scoreDeal } from '@core/market'
 import { openDb, type Db } from '@data/db'
-import { createNegotiation, getNegotiation, insertWindow, updateNegotiation, windowAfterRound } from '@data/gm'
+import { addStep, createNegotiation, getNegotiation, insertWindow, updateNegotiation, windowAfterRound } from '@data/gm'
 import { currentSeason, listEvents, listPlayers, loadConfig, seedLeague, updateConfig } from '@data/league'
 import { listChecklist, listTrades } from '@data/moves'
 import { listGames, recordScore, setPhase, startSeason } from '@data/season'
@@ -289,6 +290,80 @@ describe('superstar trades', () => {
     expect(intent.context).toContain('O1 · 가람고와 [통합: 상대 에이스 + 벤치 ↔ 우리 주전 둘 · 패키지: 선수 + 카드(우리가 2장)]')
     expect(intent.context).toContain('거래 뒤 우리 서열과 슛 비중: 1. ')
     expect(kinds[0]!.prompt(intent as never)).toContain(shapes)
+  })
+
+  it('a proposer reads a counter against what it asked for: whom it got instead, the role it loses, its strength and protection', () => {
+    // A made-up 2K league of eight: 누리고 (win-now) runs its offense through 도윤재, its only point guard who can.
+    const config = twoKConfig()
+    config.structure = sampleConfig().structure
+    config.season.playoffs = sampleConfig().season.playoffs
+    const names = ['누리고', '가람고', '다온고', '한빛고', '나래고', '미르고', '라온고', '바다고']
+    const teams: Team[] = names.map((shortName, i) => ({ id: `s${i + 1}`, name: `${shortName}등학교`, shortName, divisionId: config.structure.divisions[i % 4]!.id, control: 'ai', colors: [] }))
+    const slots = config.roster.slots.map((s) => s.id)
+    const keys = TWO_K_CATEGORIES.map((n) => n.toLowerCase().replace(/\s+/g, '-'))
+    const six: Record<string, [string, number, string][]> = {
+      s1: [
+        ['도윤재', 88, 'B+ B+ B- C- B A C- A- A-'],
+        ['김하람', 96, 'A A A+ B- A B C+ A+ A-'],
+        ['이서진', 85, 'B C B+ A A C+ B+ A C+'],
+        ['박태오', 84, 'A B+ A B- C+ A- B A+ C+'],
+        ['정우빈', 88, 'A- D D A+ C- C A+ B C+'],
+        ['최민재', 76, 'C+ C C C- B+ C- C A+ D+'],
+      ],
+      s2: [
+        ['한지후', 83, 'C+ B+ A+ D+ C+ A- C B+ B'],
+        ['윤시우', 83, 'B B A+ B- A+ B- C+ A+ B+'],
+        ['강도현', 87, 'B+ A- A B+ B+ B- B A+ B+'],
+        ['임건우', 81, 'C+ C- C- A B- C- A A D-'],
+        ['오준서', 75, 'C B- B A B- C C+ B C-'],
+        ['서은호', 72, 'D+ B A C- B+ C C- C+ D'],
+      ],
+    }
+    const players: Player[] = teams.flatMap((t, ti) =>
+      slots.map((slotId, si) => {
+        const [name, ovr, grades] = six[t.id]?.[si] ?? [`${names[ti]!.slice(0, 2)}${si + 1}호`, 78 + ((ti + si) % 6), 'B B B B B B B B B']
+        return { id: `${t.id}p${si + 1}`, teamId: t.id, name, slotId, height: '', nicknames: [], notes: '', ratings: { ovr, ...Object.fromEntries(keys.map((k, i) => [k, grades.split(' ')[i]!])) } }
+      }),
+    )
+    const own = mkdtempSync(join(tmpdir(), '2kw-gm-ask-'))
+    const d = openDb(join(own, 'league.db'))
+    try {
+      seedLeague(d, { config, teams, players })
+      mkdirSync(join(own, 'lore', 'teams', '누리고'), { recursive: true })
+      writeFileSync(
+        join(own, 'lore', 'teams', '누리고', '누리고 단장.md'),
+        `---\nid: 누리고 단장\nname: 김단장\nteam: 누리고\nphilosophy: win-now\ntraits: { risk: 4, patience: 2, star_chasing: 4, regional_pride: 4, ego: 4 }\nnegotiation: hardball\n---\n`,
+      )
+      startSeason(d)
+      const league = readLeague(d, own)
+      const data = readMarket(league)
+      const id = (name: string) => players.find((p) => p.name === name)!.id
+      const cards = data.market.cards.filter((c) => c.ownerTeamId === 's1').map((c) => c.id).slice(0, 2)
+      const asked = { a: 's1', b: 's2', aGives: [id('정우빈'), id('도윤재')], bGives: [id('강도현'), id('윤시우')], aCards: cards, bCards: [] }
+      const counter = { a: 's1', b: 's2', aGives: [id('도윤재'), id('최민재')], bGives: [id('윤시우'), id('서은호')], aCards: cards, bCards: [] }
+      const season = currentSeason(d)
+      const n = createNegotiation(d, insertWindow(d, season.id, season.phase, null, 'manual', Date.now()), asked, Date.now())
+      addStep(d, { negotiationId: n, round: 1, teamId: 's1', action: 'offer', deal: asked, message: '', note: '', report: null, trust: 0, jobId: null }, Date.now())
+      updateNegotiation(d, n, { deal: counter })
+      const input = respondInput(league, data, getNegotiation(d, n)!, 2, true, '이렇게라면 하겠습니다')
+      expect(input.context).toContain('처음 원했던 거래와 비교(코드가 계산): 원했던 강도현 대신 서은호: 가치 -')
+      expect(input.context).toContain('우리가 보내는 쪽: 정우빈 대신 최민재')
+      expect(input.context).toContain('역할: 이 거래 뒤 볼 핸들러 없음')
+      expect(input.context).toMatch(/드래프트 예상 카드 \d장\(거래 전 \d장\) · 지킬 선수 \d명/)
+      expect(input.context).toMatch(/우리 팀: (경쟁권|중위권|리빌딩) \(컨퍼런스 순위/)
+      // No game played yet: the early-season bar is on.
+      expect(input.context).toContain('시즌 초반이라 이 거래의 효용이 0.6 이상은 돼야 확실히 좋은 거래다')
+      expect(input.report.bar).toBe(0.6)
+      expect(input.report).toMatchObject({ rolesLost: ['handler'], versusAsk: { dropped: [id('강도현')], added: [id('서은호')] } })
+      expect(input.report.strengthAfter).toBeLessThan(input.report.strengthBefore)
+      expect(input.report.utility).toBeLessThan(0)
+      expect(input.report.versusAsk!.value).toBeLessThan(0)
+      // The proposer's instructions: judged against what it wanted and its team's needs, not just a little plus.
+      expect(gmKinds(d, own, { queue: () => {}, changed: () => {} })[1]!.prompt(input as never)).toContain('효용이 조금 플러스라는 것만으로 받지 않는다')
+    } finally {
+      d.close()
+      rmSync(own, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    }
   })
 
   it('demo GMs still trade with packages on the table, and every deal goes through the League engine', async () => {

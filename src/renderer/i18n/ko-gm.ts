@@ -4,6 +4,19 @@
 type RoundName = (n: number) => string
 const R: RoundName = (n) => `R${n}`
 
+/** The parts of a GM's value report past strength and value (shared/gm.ts ValueReport). */
+interface ReportMore {
+  stance?: string
+  draft?: { cards: number; cardsAfter: number; exposed: string[] }
+  rolesLost?: string[]
+  rolesFilled?: string[]
+  bar?: number
+  versusAsk?: { dropped: string[]; added: string[]; value: number; strength: number }
+}
+const STANCES: Record<string, string> = { contender: '경쟁권', bubble: '중위권', rebuilding: '리빌딩' }
+const ROLES: Record<string, string> = { handler: '볼 핸들러', big: '골밑·리바운드 빅맨', shooter: '외곽 슈터', stopper: '외곽 수비수' }
+const signed = (n: number) => `${n > 0 ? '+' : ''}${n}`
+
 export const gmText = {
   title: '단장실',
   intro: '학교마다 AI 단장이 트레이드 창이 열릴 때 누구를 노리고 어떻게 협상했는지 볼 수 있어요. 속마음은 상대 단장은 못 보는 진짜 이유예요.',
@@ -57,6 +70,22 @@ export const gmText = {
   showNotes: '속마음 보기',
   report: (before: number, after: number, gain: number, cardsIn = 0, cardsOut = 0) =>
     `전력 ${before} → ${after} · 받는 가치 ${gain > 0 ? '+' : ''}${gain}${cardsIn || cardsOut ? ` · 카드 가치 들어옴 ${cardsIn}, 나감 ${cardsOut}` : ''}`,
+  /** The rest of what the GM saw: where its team stood, its draft protection and roles after the deal, a counter against its ask, the early-season bar. */
+  reportMore: (r: ReportMore, player: (id: string) => string) =>
+    [
+      r.stance ? `우리 팀 ${STANCES[r.stance] ?? r.stance}` : '',
+      r.draft ? `드래프트 예상 카드 ${r.draft.cards === r.draft.cardsAfter ? `${r.draft.cards}장` : `${r.draft.cards} → ${r.draft.cardsAfter}장`}${r.draft.exposed.length ? ` · 못 지키는 선수: ${r.draft.exposed.map(player).join(', ')}` : ''}` : '',
+      ...(r.rolesLost ?? []).map((x) => `이 거래 뒤 ${ROLES[x] ?? x} ${x === 'shooter' ? '부족' : '없음'}`),
+      ...(r.rolesFilled ?? []).map((x) => `빈자리 채움: ${ROLES[x] ?? x}`),
+      r.versusAsk && r.versusAsk.dropped.length
+        ? `원했던 ${r.versusAsk.dropped.map(player).join(', ')} 대신 ${r.versusAsk.added.map(player).join(', ') || '없이'}: 가치 ${signed(r.versusAsk.value)}, 전력 ${signed(r.versusAsk.strength)}`
+        : r.versusAsk
+          ? `원안보다 가치 ${signed(r.versusAsk.value)}, 전력 ${signed(r.versusAsk.strength)}`
+          : '',
+      r.bar ? `시즌 초반: 효용 ${r.bar} 이상이어야 확실한 거래` : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
   trust: (n: number) => `신뢰 ${n > 0 ? '+' : ''}${n}`,
   reasons: { stalled: '응답이 오지 않아 무산됐어요.', expired: '시즌이 바뀌어 승인 기회가 지났어요.', control: '그사이 학교 운영이 바뀌어 무산됐어요.' } as Record<string, string>,
   ruleFailed: (codes: string) => `규칙에 막혀 무산됐어요 (${codes}).`,
@@ -91,6 +120,9 @@ export const gmText = {
   gmsPerWindowHelp: '의욕이 큰 순서로. 4명당 Claude 1번.',
   talksPerWindow: '창마다 협상 수',
   talksPerWindowHelp: '협상 하나에 Claude 1~2번.',
+  earlyCaution: '시즌 초반에는 신중하게',
+  earlyCautionHelp:
+    '정규시즌 경기의 20%를 치르기 전까지는 AI 단장들이 덜 움직이고, 확실히 좋은 거래만 해요. 몇 경기로 팀을 판단하지 않는 실제 단장처럼요. 35%까지 차차 보통으로 돌아오고, 라운드든 2K 일정대로든 치른 경기 수로 따져요. 트레이드 마감 같은 기능은 아니에요. 끄면 시즌 내내 똑같이 움직여요.',
   save: '저장',
   saved: '저장했어요.',
   undo: '되돌리기',

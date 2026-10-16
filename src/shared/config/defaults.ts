@@ -117,6 +117,7 @@ export function defaultConfig(): LeagueConfig {
       gmsPerWindow: 8,
       talksPerWindow: 6,
       dealCards: 3,
+      earlyCaution: true,
     },
     community: defaultCommunity(''),
     lore: { roundSweep: true, suggest: {} },

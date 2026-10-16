@@ -282,6 +282,34 @@ await step('after a whole season, a player’s page draws his mood over it', asy
   await shot('gm07-player-season')
 })
 
+await step('단장 설정: early-season caution is on unless you turn it off', async () => {
+  await page.click('.nav a:has-text("편집실")')
+  const card = '.card:has(h2:has-text("단장 설정"))'
+  const caution = `${card} label.check:has-text("시즌 초반에는 신중하게")`
+  await page.waitForSelector(caution)
+  if (!(await page.locator(`${caution} input`).isChecked())) throw new Error('early-season caution should be on by default')
+  await page.click(caution)
+  await page.click(`${card} button:has-text("저장")`)
+  await until('caution off', async () => (await invoke('leagues.snapshot', slug)).config.gm.earlyCaution === false)
+  await page.click(caution)
+  await page.click(`${card} button:has-text("저장")`)
+  await until('caution on again', async () => (await invoke('leagues.snapshot', slug)).config.gm.earlyCaution === true)
+})
+
+await step('리그 설정 → 능력치: weights and how value reads OVR change any time', async () => {
+  await page.click('.nav a:has-text("편집실")')
+  await page.click('text=리그 설정 열기')
+  await page.waitForSelector('h3:has-text("선수 가치 계산")')
+  await page.getByLabel('종합 비중 (%)').fill('60')
+  await page.getByLabel('반영할 장점 수').fill('2')
+  await page.click('button:has-text("설정 저장")')
+  await until('the value model saved', async () => {
+    const model = (await invoke('leagues.snapshot', slug)).config.ratings.valueModel
+    return model?.overallShare === 0.6 && model?.topCategories === 2
+  })
+  await shot('gm08-value-model')
+})
+
 const errors = logs.filter((l) => l.startsWith('[pageerror]') || l.startsWith('[error]'))
 if (errors.length) {
   console.log('page errors:\n' + errors.join('\n'))

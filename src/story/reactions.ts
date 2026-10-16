@@ -159,7 +159,8 @@ export function reactionPicks(league: League, events: LeagueEvent[], limit = PER
       const star = t.blockbuster ? starOf(league, moved) : null
       for (const id of moved) {
         const to = league.players.get(id)?.teamId ?? ''
-        add(id, `트레이드로 ${short(league, to)}(으)로 이적${id === star ? ' (리그가 들썩인 블록버스터 트레이드의 주인공)' : ''}`, id === star ? BLOCKBUSTER_STAR : 2 + (value.get(id) ?? 0) / 50)
+        // Capped under a blockbuster's key teammates, however high OVR-led values run.
+        add(id, `트레이드로 ${short(league, to)}(으)로 이적${id === star ? ' (리그가 들썩인 블록버스터 트레이드의 주인공)' : ''}`, id === star ? BLOCKBUSTER_STAR : Math.min(BLOCKBUSTER_MATE - 0.05, 2 + (value.get(id) ?? 0) / 50))
       }
       if (star) {
         const starTeam = league.players.get(star)?.teamId ?? ''

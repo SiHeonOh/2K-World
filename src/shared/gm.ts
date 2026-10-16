@@ -34,6 +34,18 @@ export interface ValueReport {
   gain: number
   /** Its own liking for the deal, by its leanings. */
   utility: number
+  // Added with the realistic GMs (older steps have none of these).
+  /** Where its team stood: 경쟁권, 중위권 or 리빌딩. */
+  stance?: 'contender' | 'bubble' | 'rebuilding'
+  /** Card-swap drafts: projected draft cards before and after the deal, the players it would protect, and those it couldn't. */
+  draft?: { cards: number; cardsAfter: number; need: string[]; exposed: string[] }
+  /** Core roles its lineup loses, and gaps it fills (handler, big, shooter, stopper). */
+  rolesLost?: string[]
+  rolesFilled?: string[]
+  /** The early-season caution's bar a deal had to clear (utility). */
+  bar?: number
+  /** The proposer's last word on a counter: players it asked for that the counter left out, those it got instead, and the change in raw value and strength. */
+  versusAsk?: { dropped: string[]; added: string[]; value: number; strength: number }
 }
 
 export interface StepView {

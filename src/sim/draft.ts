@@ -28,6 +28,8 @@ export const DRAFT_PRIORITY = 19
 const TEAMS_PER_PROTECT = 6
 const CARDS_PER_SWAP = 8
 const OPTIONS_PER_CARD = 6
+/** A swap that makes a team this much stronger (strength points) makes it a threat to the player it takes; OVR-led values sit closer together than the old average (1 then). */
+const THREAT_GAIN = 0.75
 
 // ── The draft as code sees it ────────────────────────────────────────────
 
@@ -128,7 +130,7 @@ function threats(d: DraftData, teamId: string, weakest: Map<string, string>): Ma
       const worst = weakest.get(o)
       if (!worst) continue
       const s = scoreDeal(d.data.market, { a: o, b: teamId, aGives: [worst], bGives: [p.id], aCards: [], bCards: [] })
-      if (s.a.after - s.a.before >= 1) n++
+      if (s.a.after - s.a.before >= THREAT_GAIN) n++
     }
     out.set(p.id, n)
   }

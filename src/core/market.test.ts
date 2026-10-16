@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { sampleConfig } from '@shared/testing/fixtures'
+import { sampleConfig, twoKConfig } from '@shared/testing/fixtures'
 import { defaultCardSwap } from '@shared/config/defaults'
 import { rng } from './random'
 import { checkTrade, type TradeContext, type TradeItem } from './trades'
 import {
   candidates,
+  caution,
+  cautionBar,
   cardValue,
   consolidationBy,
   counters,
@@ -12,7 +14,9 @@ import {
   dealStillOpen,
   isBlockbuster,
   LOPSIDED_GAP,
+  roleNews,
   scoreDeal,
+  standingOf,
   type Deal,
   type Market,
   type MarketCard,
@@ -20,6 +24,7 @@ import {
   type MarketTeam,
   type Scored,
 } from './market'
+import { ROLE_LOSS } from './roles'
 
 /** Four teams of six; team t1 has a star (90), the rest are even (60), team t4 is frozen. */
 function market(over: { leaning?: Partial<Record<string, MarketTeam['leaning']>>; unhappy?: string[]; locked?: string[] } = {}): Market {
@@ -207,39 +212,44 @@ describe('superstar trades: card packages', () => {
   const forStar = (s: Scored) => same(s.deal, ['t2p1'], ['t1p1'])
   const worth = (m: Market, ids: number[]) => ids.reduce((sum, id) => sum + cardValue(m, m.cards.find((c) => c.id === id)!), 0)
 
-  it('a contender adds the cheapest cards that win the seller over, within its room, never one it can’t trade', () => {
+  it('a contender adds the cheapest cards that win the seller over and keep the deal fair, within its room, never one it can’t trade', () => {
     const m = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t1: develop, t2: winNow }, unhappy: ['t1p1'], cards, room: { t2: 2 } })
     const plain = scoreDeal(m, { a: 't2', b: 't1', aGives: ['t2p1'], bGives: ['t1p1'], aCards: [], bCards: [] })
     expect(plain.ub).toBeLessThan(-0.5)
     const offer = candidates(m, 't2').find(forStar)!
     expect(offer).toBeDefined()
     expect(offer.ub).toBeGreaterThanOrEqual(0)
-    // Every package it could have used (one or two tradable cards): none cheaper wins the seller over.
+    expect(Math.abs(offer.gap)).toBeLessThan(LOPSIDED_GAP)
+    // Every package it could have used (one or two tradable cards): none cheaper wins the seller over in a fair deal.
+    // (His unhappy star counts for less to him, so a 4-point card alone would do, but 18 points for 4 is lopsided.)
     const tradable = [11, 12, 13, 14]
     const packs = [...tradable.map((x) => [x]), ...tradable.flatMap((x, i) => tradable.slice(i + 1).map((y) => [x, y]))]
     const cheaper = packs.filter((p) => worth(m, p) < worth(m, offer.deal.aCards))
-    for (const p of cheaper) expect(scoreDeal(m, { ...plain.deal, aCards: p }).ub).toBeLessThan(0)
-    expect(offer.deal.aCards).toEqual([12])
+    for (const p of cheaper) {
+      const s = scoreDeal(m, { ...plain.deal, aCards: p })
+      expect(s.ub < 0 || Math.abs(s.gap) >= LOPSIDED_GAP).toBe(true)
+    }
+    expect(offer.deal.aCards).toEqual([13])
     for (const s of [...candidates(m, 't2'), ...counters(m, plain.deal)]) expect([...s.deal.aCards, ...s.deal.bCards]).not.toContain(15)
   })
 
   it('never goes past the room the in-season cap leaves', () => {
-    // A balanced seller wants more: two cards (4 + 9.3, the cheapest pair over the line), or none with room for one.
-    const open = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, unhappy: ['t1p1'], cards, room: { t2: 2 } })
+    // A balanced seller of a happy star wants more: two cards (6.7 + 12, the cheapest pair over the line), or none with room for one.
+    const open = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, cards, room: { t2: 2 } })
     const two = candidates(open, 't2').find(forStar)!
-    expect(two.deal.aCards.sort()).toEqual([11, 13])
+    expect(two.deal.aCards.sort()).toEqual([12, 14])
     expect(two.ub).toBeGreaterThanOrEqual(0)
-    const capped = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, unhappy: ['t1p1'], cards, room: { t2: 1 } })
+    const capped = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, cards, room: { t2: 1 } })
     for (const s of [...candidates(capped, 't2'), ...counters(capped, two.deal)]) expect(s.deal.aCards.length).toBeLessThanOrEqual(1)
     expect(candidates(capped, 't2').some(forStar)).toBe(false)
-    const spent = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, unhappy: ['t1p1'], cards, room: { t2: 0 } })
+    const spent = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, cards, room: { t2: 0 } })
     for (const s of candidates(spent, 't2')) expect(s.deal.aCards).toEqual([])
   })
 
   it('단장 설정 sets how many cards a side may carry: fewer, none, or as many as it holds', () => {
     const market = (dealCards: number | null) => {
-      // A balanced seller wants two cards (4 + 9.3); no in-season cap left to say otherwise.
-      const m = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, unhappy: ['t1p1'], cards })
+      // A balanced seller of a happy star wants two cards (6.7 + 12); no in-season cap left to say otherwise.
+      const m = custom({ t1: seller, t2: contender, t3: EVEN, t4: EVEN }, { leaning: { t2: winNow }, cards })
       m.config.gm.dealCards = dealCards
       return m
     }
@@ -250,7 +260,7 @@ describe('superstar trades: card packages', () => {
     for (const s of all(market(0))) expect([...s.deal.aCards, ...s.deal.bCards]).toEqual([])
     // No limit: the two-card offer is back, and nothing carries more than the four cards it can trade.
     const open = market(null)
-    expect(candidates(open, 't2').find(forStar)?.deal.aCards.sort()).toEqual([11, 13])
+    expect(candidates(open, 't2').find(forStar)?.deal.aCards.sort()).toEqual([12, 14])
     for (const s of all(open)) expect(s.deal.aCards.length).toBeLessThanOrEqual(4)
   })
 
@@ -420,5 +430,105 @@ describe('blockbusters', () => {
     // One already, not as big: the league's best moving still is one; the second best (a star only with cards) isn't.
     expect(isBlockbuster(m, best, [['t3p1', 't4p6']])).toBe(true)
     expect(isBlockbuster(m, second, [['t2p3', 't4p5']])).toBe(false)
+  })
+})
+
+describe('GMs as a front office: where the team stands, early-season caution, unhappy players, roles', () => {
+  const winNow = { philosophy: 'win-now' as const, traits: {} }
+  const develop = { philosophy: 'development' as const, traits: {} }
+  /** The four schools (all in one conference, two direct playoff seeds) `played` games into a 120-game season, with these records and this table. */
+  const at = (m: Market, played: number, records: Record<string, [number, number]>, ranking: string[]) => {
+    m.season = { phase: 'regular', played, total: 120 }
+    for (const t of m.teams) {
+      const r = records[t.id]
+      if (r) t.record = { wins: r[0], losses: r[1] }
+    }
+    m.ranking = ranking
+    return m
+  }
+  const card = (id: number, owner: string): MarketCard => ({ id, ownerTeamId: owner, originalTeamId: owner, tradable: true })
+
+  it('reads contender, bubble or rebuilding from strength early on and from the table as games mount', () => {
+    // 가람고 (t1) is the strongest; 나람고 (t3) the weakest.
+    const values = { t1: [72, 70, 68, 66, 64, 60], t2: EVEN, t3: [52, 50, 48, 46, 44, 40], t4: EVEN }
+    const early = at(custom(values), 4, { t1: [0, 2], t2: [1, 1], t3: [2, 0], t4: [1, 1] }, ['t3', 't2', 't4', 't1'])
+    expect(standingOf(early, 't1')).toMatchObject({ stance: 'contender', rank: 4, strengthRank: 1, line: 2 })
+    expect(standingOf(early, 't3').stance).toBe('rebuilding')
+    // Late, the table says it: 가람고 last, 나람고 first.
+    const late = at(custom(values), 108, { t1: [4, 50], t2: [27, 27], t3: [50, 4], t4: [27, 27] }, ['t3', 't2', 't4', 't1'])
+    expect(standingOf(late, 't1').stance).toBe('rebuilding')
+    expect(standingOf(late, 't3').stance).toBe('contender')
+    // The lean grows with the season: a quarter of it early, all of it by 60% of the games.
+    expect(standingOf(early, 't1').lean).toBeCloseTo(0.25 + 0.75 * (4 / 120 / 0.6))
+    expect(standingOf(late, 't1').lean).toBe(-1)
+    // No season known (the draft, the offseason, tests without one): no lean.
+    expect(standingOf(custom(values), 't1').lean).toBe(0)
+  })
+
+  it('makes a losing win-now GM lean less win-now late in the season, and a contending developer more willing to buy', () => {
+    const cards = [card(31, 't2'), card(32, 't1')]
+    // 가람고 sells its third best (68) for 누리고's sixth man (50) and a card.
+    const sell: Deal = { a: 't1', b: 't2', aGives: ['t1p3'], bGives: ['t2p6'], aCards: [], bCards: [31] }
+    const loser = (played: number, record: [number, number]) =>
+      at(custom({ t1: [72, 70, 68, 66, 64, 60], t2: EVEN, t3: EVEN, t4: EVEN }, { leaning: { t1: winNow }, cards }), played, { t1: record }, ['t2', 't3', 't4', 't1'])
+    expect(scoreDeal(loser(108, [5, 49]), sell).ua).toBeGreaterThan(scoreDeal(loser(6, [0, 3]), sell).ua + 0.5)
+    // 가람고, a developer leading the table late, adds its sixth man (50) and a card for 누리고's best (60).
+    const buy: Deal = { a: 't1', b: 't2', aGives: ['t1p6'], bGives: ['t2p1'], aCards: [32], bCards: [] }
+    const developer = (record: [number, number], ranking: string[]) => at(custom({ t1: EVEN, t2: EVEN, t3: EVEN, t4: EVEN }, { leaning: { t1: develop }, cards }), 108, { t1: record }, ranking)
+    const leading = developer([49, 5], ['t1', 't2', 't3', 't4'])
+    const trailing = developer([5, 49], ['t2', 't3', 't4', 't1'])
+    expect(standingOf(leading, 't1').stance).toBe('contender')
+    expect(scoreDeal(leading, buy).ua).toBeGreaterThan(scoreDeal(trailing, buy).ua + 0.5)
+  })
+
+  it('is cautious early in the regular season: in full until 20% of the games, gone by 35%, never in the preseason or when 단장 설정 turns it off', () => {
+    const when = (phase: 'preseason' | 'regular', played: number, on = true) => {
+      const m = market()
+      m.season = { phase, played, total: 100 }
+      m.config.gm.earlyCaution = on
+      return m
+    }
+    expect(caution(when('regular', 10))).toBe(1)
+    expect(caution(when('regular', 20))).toBe(1)
+    expect(caution(when('regular', 27.5))).toBeCloseTo(0.5)
+    expect(caution(when('regular', 35))).toBe(0)
+    expect(caution(when('preseason', 0))).toBe(0)
+    expect(caution(when('regular', 10, false))).toBe(0)
+    expect(cautionBar(when('regular', 10))).toBe(0.6)
+    // Every deal offered early must clear the higher bar, so there are fewer of them.
+    const early = candidates(when('regular', 10), 't2')
+    for (const s of early) expect(s.ua).toBeGreaterThan(0.75)
+    expect(early.length).toBeLessThan(candidates(when('regular', 50), 't2').length)
+  })
+
+  it('counts an unhappy player for less on both sides: the buyer pays less, the seller takes less', () => {
+    const swap: Deal = { a: 't2', b: 't3', aGives: ['t2p2'], bGives: ['t3p1'], aCards: [], bCards: [] }
+    const happy = scoreDeal(market(), swap)
+    const sour = scoreDeal(market({ unhappy: ['t3p1'] }), swap)
+    expect(sour.ua).toBeLessThan(happy.ua)
+    expect(sour.a.perceived!.after).toBeLessThan(sour.a.after)
+    // Losing him costs his own GM less (and moving him on is a plus besides).
+    expect(sour.ub).toBeGreaterThan(happy.ub + 0.8)
+    // What the report shows is his real worth.
+    expect([sour.a.after, sour.b.after, sour.gap]).toEqual([happy.a.after, happy.b.after, happy.gap])
+  })
+
+  it('weighs a lineup’s core roles: losing the only ball handler costs a clear point', () => {
+    const roled = () => {
+      const m = custom({ t1: EVEN, t2: EVEN, t3: EVEN, t4: EVEN })
+      m.config = twoKConfig()
+      for (const p of m.players) p.roles = p.slotId === 'pg' ? ['handler'] : p.slotId === 'c' ? ['big'] : p.slotId === 'sg' ? ['shooter', 'stopper'] : ['shooter']
+      return m
+    }
+    // 가람고 sends its point guard (60, its only handler) for 누리고's small forward (56).
+    const d: Deal = { a: 't1', b: 't2', aGives: ['t1p1'], bGives: ['t2p3'], aCards: [], bCards: [] }
+    const m = roled()
+    const s = scoreDeal(m, d)
+    expect(roleNews(m, s.a)).toEqual({ lost: ['handler'], filled: [] })
+    const blind = custom({ t1: EVEN, t2: EVEN, t3: EVEN, t4: EVEN })
+    blind.config = twoKConfig()
+    expect(s.ua).toBeCloseTo(scoreDeal(blind, d).ua - ROLE_LOSS, 1)
+    // 누리고 gets a second handler: no gap filled, nothing lost.
+    expect(roleNews(m, s.b)).toEqual({ lost: [], filled: [] })
   })
 })

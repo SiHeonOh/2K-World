@@ -1,4 +1,4 @@
-import type { LeagueConfig, Phase } from './config/schema'
+import { DEFAULT_VALUE_MODEL, type LeagueConfig, type Phase, type ValueModel } from './config/schema'
 import type { Team } from './setup'
 
 /**
@@ -18,12 +18,19 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
  * - structure: conferences, divisions, and each team's division;
  * - schedule: games per season, how rounds are built, and the calendar;
  * - playoffs: the playoff format and the tiebreakers that seed it;
- * - labels: each rating column's Korean name ('' for the built-in one).
+ * - labels (능력치): each rating column's Korean name ('' for the built-in
+ *   one), its weight in player value, and the value model (OVR's share and
+ *   how many of a player's best other ratings count). Only what's shown and
+ *   how the AI GMs and moods read players change, so any time.
  */
 export interface LeagueSettingsInput {
   structure: LeagueConfig['structure']
   /** Rating column id → the name shown for it; '' leaves it to the dictionary (shared/labels.ts). */
   ratingLabels: Record<string, string>
+  /** Rating column id → its weight in player value (0: shown only); left out, the weights stay as they are. */
+  ratingWeights?: Record<string, number>
+  /** How value reads the headline rating; null: the defaults (OVR 55%, the best 6 others). Left out: as it is. */
+  valueModel?: ValueModel | null
   roster: LeagueConfig['roster']
   schedule: LeagueConfig['season']['schedule']
   calendar: LeagueConfig['season']['calendar']
@@ -96,7 +103,9 @@ export function changedSections(before: LeagueSettingsInput, after: LeagueSettin
   if (team((t) => t.control)) out.push('control')
   if (!same(before.awards, after.awards)) out.push('awards')
   if (!same(before.trades, after.trades)) out.push('trades')
-  if (!same(labelsOf(before.ratingLabels), labelsOf(after.ratingLabels))) out.push('labels')
+  const weights = after.ratingWeights !== undefined && !same(before.ratingWeights ?? {}, { ...before.ratingWeights, ...after.ratingWeights })
+  const model = after.valueModel !== undefined && !same(modelOf(before.valueModel), modelOf(after.valueModel))
+  if (!same(labelsOf(before.ratingLabels), labelsOf(after.ratingLabels)) || weights || model) out.push('labels')
   if (!same(before.roster, after.roster)) out.push('roster')
   if (!same(before.playoffs, after.playoffs) || !same(before.standings, after.standings)) out.push('playoffs')
   if (!same(effectiveDraft(before.draft), effectiveDraft(after.draft))) out.push('draft')
@@ -109,6 +118,15 @@ export function changedSections(before: LeagueSettingsInput, after: LeagueSettin
 const labelsOf = (labels: Record<string, string> | undefined) =>
   Object.fromEntries(Object.entries(labels ?? {}).flatMap(([id, l]) => (l.trim() ? [[id, l.trim()]] : [])))
 
+/** A value model as it reads: the defaults for whatever it leaves out. */
+const modelOf = (model: ValueModel | null | undefined): ValueModel => ({ ...DEFAULT_VALUE_MODEL, ...(model ?? {}) })
+
+/** A value model as it's stored: left out when it's the defaults, so a league that never changed it has none. */
+function storedModel(model: ValueModel | null | undefined): ValueModel | null {
+  const m = modelOf(model)
+  return m.overallShare === DEFAULT_VALUE_MODEL.overallShare && m.topCategories === DEFAULT_VALUE_MODEL.topCategories ? null : m
+}
+
 /** A draft setting the engine no longer runs ('standard' never had a draft): read as none. */
 export function effectiveDraft(draft: LeagueConfig['draft']): LeagueConfig['draft'] {
   return draft.kind === 'standard' ? { kind: 'none' } : draft
@@ -119,6 +137,8 @@ export function settingsOf(config: LeagueConfig, teams: Team[]): LeagueSettingsI
   return {
     structure: config.structure,
     ratingLabels: Object.fromEntries(config.ratings.columns.map((c) => [c.id, c.label ?? ''])),
+    ratingWeights: Object.fromEntries(config.ratings.columns.map((c) => [c.id, c.weight])),
+    valueModel: config.ratings.valueModel ?? null,
     roster: config.roster,
     schedule: config.season.schedule,
     calendar: config.season.calendar,
@@ -134,12 +154,19 @@ export function settingsOf(config: LeagueConfig, teams: Team[]): LeagueSettingsI
 /** The config with the settings' parts put in; everything else (community, AI, the league's name…) stays. */
 export function applySettings(config: LeagueConfig, input: LeagueSettingsInput): LeagueConfig {
   const labels = labelsOf(input.ratingLabels)
+  const weights = input.ratingWeights ?? {}
+  const { valueModel: _model, ...ratings } = config.ratings
+  const model = storedModel(input.valueModel === undefined ? config.ratings.valueModel : input.valueModel)
   return {
     ...config,
-    // Only the names shown change: a blank one goes back to the dictionary's.
+    // Names shown (a blank one goes back to the dictionary's), weights and the value model: how players are read, never the ratings.
     ratings: {
-      ...config.ratings,
-      columns: config.ratings.columns.map(({ label: _, ...c }) => (labels[c.id] ? { ...c, label: labels[c.id] } : c)),
+      ...ratings,
+      columns: config.ratings.columns.map(({ label: _, ...c }) => {
+        const weighed = typeof weights[c.id] === 'number' ? { ...c, weight: weights[c.id]! } : c
+        return labels[c.id] ? { ...weighed, label: labels[c.id] } : weighed
+      }),
+      ...(model ? { valueModel: model } : {}),
     },
     structure: input.structure,
     roster: input.roster,

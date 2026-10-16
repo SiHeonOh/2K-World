@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { Api, AppInfo, ApiChannel, DialogLabels, DraftMoveInput, ScoreInput } from '@shared/api'
 import { communitySchema, gmSchema, leagueConfigSchema, loreConfigSchema, suggestionModeSchema, aiConfigSchema, wikiConfigSchema } from '@shared/config/schema'
-import { awardsSchema, calendarSchema, draftSchema, playoffsSchema, rosterSchema, scheduleSchema, standingsSchema, structureSchema, tradesSchema } from '@shared/config/schema'
+import { awardsSchema, calendarSchema, draftSchema, playoffsSchema, rosterSchema, scheduleSchema, standingsSchema, structureSchema, tradesSchema, valueModelSchema } from '@shared/config/schema'
 import type { SchoolFolderMove } from '@shared/backups'
 import type { LeagueSettingsInput } from '@shared/settings'
 import { cardsExpiring, settingsState } from '@data/settings'
@@ -196,6 +196,8 @@ const settingsInputSchema = z.object({
   structure: structureSchema,
   // The config check holds each label to its own limit.
   ratingLabels: z.record(z.string().max(64), z.string().max(100)),
+  ratingWeights: z.record(z.string().max(64), z.number().min(0).max(100)).optional(),
+  valueModel: valueModelSchema.nullable().optional(),
   roster: rosterSchema,
   schedule: scheduleSchema,
   calendar: calendarSchema,

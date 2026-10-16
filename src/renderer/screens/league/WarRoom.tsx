@@ -315,7 +315,17 @@ function Step({ s, left, names, notes }: { s: StepView; left: boolean; names: Na
           <b>{tg.note}</b> {s.note}
         </p>
       ) : null}
-      {notes && s.report ? <p className="gm-report muted">{tg.report(s.report.strengthBefore, s.report.strengthAfter, s.report.gain, s.report.cardsIn, s.report.cardsOut)}</p> : null}
+      {notes && s.report ? (
+        <p className="gm-report muted">
+          {tg.report(s.report.strengthBefore, s.report.strengthAfter, s.report.gain, s.report.cardsIn, s.report.cardsOut)}
+          {tg.reportMore(s.report, names.player) ? (
+            <>
+              <br />
+              {tg.reportMore(s.report, names.player)}
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   )
 }

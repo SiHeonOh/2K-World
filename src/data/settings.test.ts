@@ -197,6 +197,25 @@ describe('teams', () => {
     expect(save(db, (s) => void (s.ratingLabels.ovr = ''))).toMatchObject({ changed: [] })
   })
 
+  it('changes how value reads players any time: each column’s weight and the value model, the defaults stored as nothing', () => {
+    const db = league()
+    to(db, 'draft')
+    const r = save(db, (s) => {
+      s.ratingWeights!.shoot = 2
+      s.valueModel = { overallShare: 0.7, topCategories: 4 }
+    })
+    expect(r).toMatchObject({ changed: ['labels'] })
+    const { ratings } = loadConfig(db).config
+    expect(ratings.columns.find((c) => c.id === 'shoot')!.weight).toBe(2)
+    expect(ratings.valueModel).toEqual({ overallShare: 0.7, topCategories: 4 })
+    // Back to the defaults: nothing stored, as in a league that never changed it.
+    save(db, (s) => void (s.valueModel = { overallShare: 0.55, topCategories: 6 }))
+    expect(loadConfig(db).config.ratings).not.toHaveProperty('valueModel')
+    expect(save(db, (s) => void (s.valueModel = null))).toMatchObject({ changed: [] })
+    // Out of range is the config check's to refuse.
+    expect(refusal(() => save(db, (s) => void (s.ratingWeights!.ovr = -1)))).not.toEqual([])
+  })
+
   it('refuses the same short name twice, a short name a player has, and adding or dropping teams', () => {
     const db = league()
     expect(refusal(() => save(db, (s) => void (s.teams[1]!.shortName = s.teams[0]!.shortName)))).toEqual(['duplicate-name'])

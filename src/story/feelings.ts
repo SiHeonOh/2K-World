@@ -22,8 +22,8 @@ export interface PlayerFeelings extends Feelings {
   belonging: number
 }
 
-/** A team's value change in a deal (points) that counts as clearly stronger or weaker. */
-const DEAL_GAIN = 8
+/** A team's value change in a deal (points) that counts as clearly stronger or weaker (OVR-led values sit closer together than the old average of every rating: 8 then). */
+const DEAL_GAIN = 6
 /** Mood snapshots that count for wanting out (his latest at his school this season). */
 const RECENT_SNAPSHOTS = 10
 const FRIENDLY = new Set(['friend', 'family', 'mentor'])

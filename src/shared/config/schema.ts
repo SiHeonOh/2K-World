@@ -84,12 +84,27 @@ export const ratingColumnSchema = z.discriminatedUnion('kind', [
   z.object({ ...ratingBase, kind: z.literal('grade') }),
 ])
 
+/**
+ * How player value reads a league with a headline rating (src/core/value.ts):
+ * that rating's share, and how many of a player's best other ratings make up
+ * the rest, so a specialist is valued by what he's good at. Only how the AI
+ * GMs and moods read players; the ratings themselves never change.
+ */
+export const DEFAULT_VALUE_MODEL = { overallShare: 0.55, topCategories: 6 } as const
+
+export const valueModelSchema = z.object({
+  overallShare: z.number().min(0).max(1).default(DEFAULT_VALUE_MODEL.overallShare),
+  topCategories: int(1, 50).default(DEFAULT_VALUE_MODEL.topCategories),
+})
+
 export const ratingsSchema = z.object({
   columns: z.array(ratingColumnSchema),
   /** Best grade first. Shared by every grade column. */
   gradeScale: z.array(gradeStepSchema).min(2),
   /** The headline rating (e.g. OVR), shown first everywhere. */
   overallColumnId: idSchema.nullable(),
+  /** Added after config v4: left out, the defaults (OVR 55%, the best 6 categories). */
+  valueModel: valueModelSchema.optional(),
 })
 
 export const playerFieldsSchema = z.object({
@@ -396,6 +411,12 @@ export const gmSchema = z.object({
   talksPerWindow: int(1, 20).default(6),
   /** Cards one side of an AI deal may carry; null: as many as it holds (the in-season cap still applies). */
   dealCards: int(0, 20).nullable().default(3),
+  /**
+   * Early-season caution: until about 20% of the regular season's games are
+   * played, GMs are less eager and want clearly better deals, easing back to
+   * normal by about 35%. Added after config v4 (on unless turned off).
+   */
+  earlyCaution: z.boolean().default(true),
 })
 
 // ── Community ────────────────────────────────────────────────────────────
@@ -549,6 +570,7 @@ export type Division = z.infer<typeof divisionSchema>
 export type Slot = z.infer<typeof slotSchema>
 export type RatingColumn = z.infer<typeof ratingColumnSchema>
 export type GradeStep = z.infer<typeof gradeStepSchema>
+export type ValueModel = z.infer<typeof valueModelSchema>
 export type Tiebreaker = z.infer<typeof tiebreakerSchema>
 export type SeasonAward = z.infer<typeof seasonAwardSchema>
 export type PeriodicAward = z.infer<typeof periodicAwardSchema>
