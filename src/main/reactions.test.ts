@@ -26,6 +26,7 @@ import {
   type PlayerReactionOutput,
 } from '@story/reactions'
 import { wikiEditDemo, wikiEditKind } from '@story/wikiEdits'
+import { ko } from '../renderer/i18n/ko'
 import { AiService } from './ai'
 import { StoryService } from './story'
 
@@ -423,6 +424,18 @@ describe("a player's memory and his page", () => {
     appendEvent(db, 'award_removed', { awardId: 'potw', period: 'W1', teamRank: 1, playerId: 'p1' }, currentSeason(db).id)
     const awards = playerState(readLeague(db, dir), 'p1').timeline.filter((x) => x.kind === 'award')
     expect(awards).toEqual([expect.objectContaining({ award: '이주의 선수', removed: true })])
+  })
+
+  it('his page names a weekly award by its week and the conference it was given in', () => {
+    appendEvent(db, 'award_given', { awardId: 'potw', period: 'w3', teamRank: 1, playerId: 'p1', group: 'east' }, currentSeason(db).id)
+    appendEvent(db, 'award_given', { awardId: 'potm', period: 'm2', teamRank: 1, playerId: 'p1' }, currentSeason(db).id)
+    // Newest first.
+    const awards = playerState(readLeague(db, dir), 'p1').timeline.flatMap((x) => (x.kind === 'award' ? [x] : []))
+    expect(awards.map((a) => [a.award, a.period, a.group])).toEqual([
+      ['이달의 선수', 'm2', ''],
+      ['이주의 선수', 'w3', '동'],
+    ])
+    expect(awards.map((a) => ko.mood.player.award(a.award, a.period, a.teamRank, a.group))).toEqual(['수상: 11월 이달의 선수', '수상: 3주차 동 이주의 선수'])
   })
 
   it('his page has his mood after each move, what happened to him and what he said, newest first', async () => {

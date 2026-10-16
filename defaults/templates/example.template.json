@@ -322,13 +322,15 @@
           "id": "potw",
           "name": "이주의 선수",
           "period": "week",
-          "winners": 1
+          "winners": 1,
+          "scope": "conference"
         },
         {
           "id": "potm",
           "name": "이달의 선수",
           "period": "month",
-          "winners": 1
+          "winners": 1,
+          "scope": "conference"
         }
       ]
     },

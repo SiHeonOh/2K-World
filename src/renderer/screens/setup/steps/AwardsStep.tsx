@@ -1,3 +1,4 @@
+import type { AwardScope } from '@shared/awards'
 import { Badge, NumberInput, RowControls, Select, TextInput, move } from '../../../components/ui'
 import { t } from '../../../i18n'
 import { StepIssues } from '../StepIssues'
@@ -145,15 +146,25 @@ export function SeasonAwardsCard({ state, edit, given }: CardProps) {
   )
 }
 
+/** A new weekly or monthly award goes per conference once the league has two (as the NBA's do), else league-wide. */
+const newScope = (s: WizardState): AwardScope => (s.setup.config.structure.conferences.length >= 2 ? 'conference' : 'league')
+
+const SCOPES: AwardScope[] = ['league', 'conference', 'division']
+
 export function PeriodicAwardsCard({ state, edit, given }: CardProps) {
   const { awards } = state.setup.config
   return (
     <div className="card flush">
       <div className="card-head" style={{ padding: '14px 16px' }}>
-        <h2>{t.wizard.awards.periodic}</h2>
+        <div>
+          <h2>{t.wizard.awards.periodic}</h2>
+          <p className="help">{t.wizard.awards.scopeHelp}</p>
+        </div>
         <button
           className="btn small"
-          onClick={() => edit((s) => void s.setup.config.awards.periodic.push({ id: newAwardId(s), name: t.wizard.awards.newAward, period: 'week', winners: 1 }))}
+          onClick={() =>
+            edit((s) => void s.setup.config.awards.periodic.push({ id: newAwardId(s), name: t.wizard.awards.newAward, period: 'week', winners: 1, scope: newScope(s) }))
+          }
         >
           {t.wizard.awards.addPeriodic}
         </button>
@@ -164,6 +175,7 @@ export function PeriodicAwardsCard({ state, edit, given }: CardProps) {
             <tr>
               <th>{t.wizard.awards.name}</th>
               <th>{t.wizard.awards.period}</th>
+              <th>{t.wizard.awards.scope}</th>
               <th>{t.wizard.awards.winners}</th>
               <th />
             </tr>
@@ -190,6 +202,15 @@ export function PeriodicAwardsCard({ state, edit, given }: CardProps) {
                     value={a.period}
                     options={(['week', 'month'] as const).map((v) => ({ value: v, label: t.wizard.awards.periods[v] }))}
                     onChange={(v) => edit((s) => void (s.setup.config.awards.periodic[i]!.period = v))}
+                  />
+                </td>
+                <td>
+                  <Select
+                    compact
+                    ariaLabel={t.app.cellLabel(a.name, t.wizard.awards.scope)}
+                    value={a.scope}
+                    options={SCOPES.map((v) => ({ value: v, label: t.wizard.awards.scopes[v] }))}
+                    onChange={(v) => edit((s) => void (s.setup.config.awards.periodic[i]!.scope = v))}
                   />
                 </td>
                 <td>

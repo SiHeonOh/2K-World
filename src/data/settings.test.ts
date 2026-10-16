@@ -6,7 +6,7 @@ import { SetupError, type LeagueSetup } from '@shared/setup'
 import { settingsOf, type LeagueSettingsInput } from '@shared/settings'
 import { openDb, type Db } from './db'
 import { currentSeason, factsStamp, listEvents, listTeams, loadConfig, seedLeague, updateConfig } from './league'
-import { applyTrade, closeProtection, finishDraft, giveAward, listCards } from './moves'
+import { applyTrade, closeProtection, finishDraft, giveAward, listAwards, listCards } from './moves'
 import { RuleError } from './rules'
 import { finishPlayoffs, listGames, recordScore, startPlayoffs, startSeason } from './season'
 import { cardsExpiring, checkSettings, commitSettings, sectionLocks, settingsState } from './settings'
@@ -299,6 +299,66 @@ describe('awards', () => {
     const { awards } = loadConfig(db).config
     expect(awards.periodic.find((a) => a.id === 'potw')!.name).toBe('주간 MVP')
     expect(awards.season.map((a) => a.id)).toEqual(['mvp', 'all-league', 'finals-mvp', 'clutch'])
+  })
+
+  it('changes a weekly award’s scope only while each period’s winners fit their groups', () => {
+    const db = league()
+    startSeason(db)
+    const potw = (s: LeagueSettingsInput) => s.awards.periodic.find((a) => a.id === 'potw')!
+    const scope = () => loadConfig(db).config.awards.periodic.find((a) => a.id === 'potw')!
+    // League-wide, one a week: p1 (t1, 동) won week 1, p13 (t3, 서) week 2. At most one a conference each week: it fits.
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p1' })
+    giveAward(db, { awardId: 'potw', period: 'w2', teamRank: 1, playerId: 'p13' })
+    save(db, (s) => void (potw(s).scope = 'conference'))
+    expect(scope()).toMatchObject({ scope: 'conference', winners: 1 })
+    // Week 1 gets 서's winner too: two that week, more than league-wide's one.
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p19' })
+    expect(refusal(() => save(db, (s) => void (potw(s).scope = 'league')))).toEqual(['settings-award-shape'])
+    // Two a week league-wide hold them; then two 동 winners in week 3 don't fit one a conference.
+    save(db, (s) => {
+      potw(s).scope = 'league'
+      potw(s).winners = 2
+    })
+    giveAward(db, { awardId: 'potw', period: 'w3', teamRank: 1, playerId: 'p1' })
+    giveAward(db, { awardId: 'potw', period: 'w3', teamRank: 1, playerId: 'p7' })
+    expect(
+      refusal(() =>
+        save(db, (s) => {
+          potw(s).scope = 'conference'
+          potw(s).winners = 1
+        }),
+      ),
+    ).toEqual(['settings-award-shape'])
+    // Per division they're apart (t1 is 북, t2 남): one each fits.
+    save(db, (s) => {
+      potw(s).scope = 'division'
+      potw(s).winners = 1
+    })
+    expect(scope()).toMatchObject({ scope: 'division', winners: 1 })
+  })
+
+  it('counts a scope change with the save’s own structure: a school moved in the same save counts where it goes', () => {
+    const db = league()
+    // Weekly awards can be given before the season too; league-wide, two a week.
+    save(db, (s) => void (s.awards.periodic.find((a) => a.id === 'potw')!.winners = 2))
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p1' })
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p13' })
+    const perConference = (s: LeagueSettingsInput) => {
+      const potw = s.awards.periodic.find((a) => a.id === 'potw')!
+      potw.scope = 'conference'
+      potw.winners = 1
+    }
+    // t3 (p13's) moved from 해 (서) to 북 (동) in the same save: both winners would be 동's.
+    expect(
+      refusal(() =>
+        save(db, (s) => {
+          perConference(s)
+          s.teams.find((t) => t.id === 't3')!.divisionId = 'n'
+        }),
+      ),
+    ).toEqual(['settings-award-shape'])
+    save(db, perConference)
+    expect(listAwards(db, currentSeason(db).id).map((a) => a.group)).toEqual(['east', 'west'])
   })
 })
 

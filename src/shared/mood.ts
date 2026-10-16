@@ -70,7 +70,8 @@ export type PlayerTimelineItem =
   | { kind: 'draft'; at: string; from: string; to: string; vetoed: boolean }
   /** His slot changed in 로스터 편집 (slot names; `rotation`: up to the starters or down to the bench, if either). */
   | { kind: 'slot'; at: string; from: string; to: string; rotation: 'up' | 'down' | null }
-  | { kind: 'award'; at: string; award: string; period: string; teamRank: number; removed: boolean }
+  /** `group`: the conference's or division's name it was won in ('' when league-wide). */
+  | { kind: 'award'; at: string; award: string; period: string; group: string; teamRank: number; removed: boolean }
   | { kind: 'mood'; at: string; from: MoodBand; to: MoodBand; reasons: MoodPartName[] }
   | { kind: 'wanting'; at: string; value: number }
 

@@ -1,3 +1,4 @@
+import { awardTitle, periodLabel } from '@shared/awards'
 import type { LeagueConfig, WikiConfig } from '@shared/config/schema'
 import type { EventPayloads } from '@shared/events'
 import { parseWiki } from '@shared/namumark'
@@ -84,13 +85,6 @@ function schoolColors(league: League | null, team: Team | undefined): string[] {
 }
 
 const STAGES: Record<string, string> = { regular: '정규', 'play-in': '플레이-인', playoffs: '플레이오프', finals: '파이널' }
-
-/** 'w3' → '3주차', 'm2' → '2개월차', '' → ''. */
-function periodLabel(period: string): string {
-  const m = period.match(/^([wm])(\d+)$/)
-  if (!m) return period
-  return m[1] === 'w' ? `${m[2]}주차` : `${m[2]}개월차`
-}
 
 const pct = (w: number, l: number) => (w + l === 0 ? '-' : (w / (w + l)).toFixed(3).replace(/^0/, ''))
 
@@ -390,17 +384,20 @@ export class WikiService {
     return { band: team?.shortName ?? null, title: p.name, subtitle: null, colors: schoolColors(league, team), rows, ratings: ratings.length ? { title: '능력치', rows: ratings } : null }
   }
 
-  /** His awards for the infobox: season awards by season ("시즌 1 MVP"), weekly and monthly ones counted ("이주의 선수 3회"). */
+  /**
+   * His awards for the infobox: season awards by season ("시즌 1 MVP"), weekly
+   * and monthly ones counted, with the group they were won in ("동부 이주의 선수 3회").
+   */
   private awardsOf(db: Db, ctx: Ctx, playerId: string): string {
     const out: string[] = []
     const counted = new Map<string, number>()
     for (const [sid, label] of ctx.seasonLabels) {
-      for (const a of listAwards(db, sid)) {
+      for (const a of listAwards(db, sid, ctx.config)) {
         if (a.playerId !== playerId) continue
         const season = ctx.config.awards.season.find((x) => x.id === a.awardId)
         if (season) out.push(`${label} ${season.name}${a.teamRank > 1 ? ` ${a.teamRank}팀` : ''}`)
         else {
-          const name = ctx.config.awards.periodic.find((x) => x.id === a.awardId)?.name ?? a.awardId
+          const name = awardTitle(ctx.config, { awardId: a.awardId, group: a.group })
           counted.set(name, (counted.get(name) ?? 0) + 1)
         }
       }
@@ -498,13 +495,14 @@ export class WikiService {
   private playerHistory(db: Db, ctx: Ctx, p: PlayerRow): HistoryItem[] {
     const out: HistoryItem[] = []
     const season = (id: number | null) => (id === null ? '' : (ctx.seasonLabels.get(id) ?? ''))
-    const awardName = (id: string) => [...ctx.config.awards.season, ...ctx.config.awards.periodic].find((a) => a.id === id)?.name ?? id
     for (const e of listEvents(db)) {
       const x = e.payload as Record<string, unknown>
       if (e.type === 'trade_applied' && (x.players as string[]).includes(p.id)) {
         out.push({ at: e.createdAt, season: season(e.seasonId), text: `트레이드: ${(x.teams as string[]).map((t) => this.teamName(ctx, t)).join(' ↔ ')}` })
       } else if (e.type === 'award_given' && x.playerId === p.id) {
-        out.push({ at: e.createdAt, season: season(e.seasonId), text: `수상: ${awardName(x.awardId as string)}${x.period ? ` (${periodLabel(x.period as string)})` : ''}` })
+        // "수상: 3주차 동부 이주의 선수": the group as it was given (the event keeps it).
+        const a = x as EventPayloads['award_given']
+        out.push({ at: e.createdAt, season: season(e.seasonId), text: `수상: ${awardTitle(ctx.config, a)}${a.teamRank > 1 ? ` ${a.teamRank}팀` : ''}` })
       } else if (e.type === 'draft_protect' && x.playerId === p.id) {
         out.push({ at: e.createdAt, season: season(e.seasonId), text: `드래프트: ${this.teamName(ctx, x.teamId as string)}의 보호 선수로 지정` })
       } else if (e.type === 'draft_swap' && (x.playerId === p.id || x.targetPlayerId === p.id)) {
@@ -705,14 +703,14 @@ export class WikiService {
     }
   }
 
+  /** Every season's winners: the award with the group it was won in ("동부 이주의 선수"), and its period (3주차, 11월). */
   private awardsTable(db: Db, ctx: Ctx): WikiTable {
     const rows: WikiTable['rows'] = []
     for (const [sid, label] of ctx.seasonLabels) {
-      for (const a of listAwards(db, sid)) {
-        const award = [...ctx.config.awards.season, ...ctx.config.awards.periodic].find((x) => x.id === a.awardId)
+      for (const a of listAwards(db, sid, ctx.config)) {
         const player = ctx.players.find((p) => p.id === a.playerId)
         rows.push({
-          cells: [label, `${award?.name ?? a.awardId}${a.teamRank > 1 ? ` ${a.teamRank}팀` : ''}`, periodLabel(a.period), player?.name ?? a.playerId],
+          cells: [label, `${awardTitle(ctx.config, { awardId: a.awardId, group: a.group })}${a.teamRank > 1 ? ` ${a.teamRank}팀` : ''}`, periodLabel(a.period), player?.name ?? a.playerId],
           link: ctx.titles.player.get(a.playerId) ?? null,
         })
       }

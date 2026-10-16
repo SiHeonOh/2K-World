@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
 import { bufferSize, lastEventId, listPersonas, openPost, setStoryValue } from '@data/community'
 import { openDb, type Db } from '@data/db'
-import { appendEvent, currentSeason, listPlayers, listTeams, loadConfig, seedLeague } from '@data/league'
+import { appendEvent, currentSeason, listPlayers, listTeams, loadConfig, seedLeague, updateConfig } from '@data/league'
 import { applyTrade, closeProtection, draftMove, draftView, giveAward, listAwards, removeAward, vetoDraftSwap, vetoTrade } from '@data/moves'
 import { finishPlayoffs, listGames, playoffsView, recordScore, startPlayoffs, startSeason, unrecordGame } from '@data/season'
 import { defaultCardSwap } from '@shared/config/defaults'
@@ -413,7 +413,7 @@ describe('StoryService (demo writer)', () => {
     let wiki = wikiInput(wikiJobs()[0]!)
     expect(wiki.instructions).toMatch(/^이번 일은 수상이다\./)
     expect(wiki.pages).toEqual([nameOf('p1'), nameOf('p7')])
-    expect(wiki.context).toContain(`- 수상: 이주의 선수(주간 상, 1주차) — ${nameOf('p1')} (${schoolOf('t1')})`)
+    expect(wiki.context).toContain(`- 수상: 1주차 이주의 선수(주간 상) — ${nameOf('p1')} (${schoolOf('t1')})`)
     expect(wiki.context).toContain(`- 수상: MVP(시즌 상) — ${nameOf('p7')} (${schoolOf('t2')})`)
 
     // Typed in a moment later, while that job still waits: it joins it.
@@ -450,6 +450,34 @@ describe('StoryService (demo writer)', () => {
     giveAward(db, { awardId: 'mvp', period: '', teamRank: 1, playerId: 'p19' })
     story.afterChange('test', db, dir)
     expect(wikiInput(wikiJobs()[2]!).context).not.toContain('수상 취소')
+  })
+
+  it('tells the forum and the wiki a weekly award by its week and conference, never by its code', async () => {
+    const { config } = loadConfig(db)
+    config.awards.periodic[0]!.scope = 'conference'
+    updateConfig(db, config)
+    startSeason(db)
+    story.afterChange('test', db, dir)
+    await drain()
+    // p13 plays for t3 (서); 이달의 선수 stays league-wide.
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p13' })
+    giveAward(db, { awardId: 'potm', period: 'm2', teamRank: 1, playerId: 'p1' })
+    story.afterChange('test', db, dir)
+    const thread = jobs()
+      .filter((j) => j.kind === 'event_thread')
+      .map((j) => (JSON.parse(j.input) as { context: string }).context)
+      .find((c) => c.includes('# 이번 소식\n- 수상:'))!
+    expect(thread).toContain(`- 수상: 1주차 서 이주의 선수 — ${nameOf('p13')} (${schoolOf('t3')})`)
+    expect(thread).toContain(`- 수상: 11월 이달의 선수 — ${nameOf('p1')} (${schoolOf('t1')})`)
+    expect(thread).not.toContain('(w1)')
+    const wiki = wikiInput(wikiJobs().at(-1)!)
+    expect(wiki.context).toContain(`- 수상: 1주차 서 이주의 선수(주간 상) — ${nameOf('p13')} (${schoolOf('t3')})`)
+    expect(wiki.context).toContain(`- 수상: 11월 이달의 선수(월간 상) — ${nameOf('p1')} (${schoolOf('t1')})`)
+    // Taken back once written, the line names it the same way.
+    await drain()
+    removeAward(db, awardId('potw', 'w1'))
+    story.afterChange('test', db, dir)
+    expect(wikiInput(wikiJobs().at(-1)!).context).toContain(`- 수상 취소(없던 일이 됨): 1주차 서 이주의 선수(주간 상) — ${nameOf('p13')}`)
   })
 
   it('splits a burst of awards over more pages than one job edits', () => {
@@ -899,7 +927,7 @@ describe('StoryService (demo writer)', () => {
     const wiki = wikiInput(wikiJobs()[1]!)
     expect(wiki.context).not.toContain('- 수상: MVP')
     expect(wiki.context).toContain(`- 수상 취소(없던 일이 됨): MVP(시즌 상) — ${nameOf('p7')}`)
-    expect(wiki.context).toContain(`- 수상: 이주의 선수(주간 상, 2주차) — ${nameOf('p13')}`)
+    expect(wiki.context).toContain(`- 수상: 2주차 이주의 선수(주간 상) — ${nameOf('p13')}`)
   })
 
   it("keeps a waiting job's age when something only leaves it", () => {

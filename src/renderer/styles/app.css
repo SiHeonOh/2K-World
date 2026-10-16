@@ -1118,6 +1118,25 @@ ol.plain {
 .award-slot .badge {
   padding-right: 2px;
 }
+.award-slot-label {
+  min-width: 48px;
+}
+/* A weekly or monthly award's period: its places (one per conference or division) under its name. */
+.award-period + .award-period {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.award-period-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+/* The period picked above: its name in the accent (a league-wide award's is its place's label). */
+.award-period.picked > .award-period-head,
+.award-period.picked > .award-slot:first-child > .award-slot-label {
+  color: var(--accent-text);
+}
 
 /* ── Game day ──────────────────────────────────────────────────────── */
 

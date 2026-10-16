@@ -180,6 +180,11 @@ export interface AwardRow {
   playerId: string
   /** The team he won it for: his team when it was given (in the draft or offseason, his team when the games ended). */
   teamId: string
+  /**
+   * The conference or division its winners are counted in (the award's scope,
+   * by that team's place in today's structure); null when league-wide.
+   */
+  group: string | null
 }
 
 /** A rule the League engine refused a move on; translated in the renderer. */

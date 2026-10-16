@@ -268,6 +268,83 @@ describe('awards', () => {
     expect(listAwards(db, currentSeason(db).id)).toHaveLength(2)
   })
 
+  it('gives a weekly award per conference: a winner a week in each, counted for the school he won it for', () => {
+    const db = league((s) => void (s.config.awards.periodic[0]!.scope = 'conference'))
+    startSeason(db)
+    const season = currentSeason(db).id
+    // p1 plays for t1 and p7 for t2 (both 동), p13 for t3 (서).
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p1' })
+    const full = (() => {
+      try {
+        giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p7' })
+      } catch (e) {
+        return e instanceof RuleError ? e.issues : []
+      }
+      return []
+    })()
+    expect(full).toEqual([{ code: 'award-full', params: { limit: 1, group: '동' } }])
+    expect(ko.rules['award-full']!(full[0]!.params)).toBe('동 자리는 이미 1명이 찼어요')
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p13' })
+    // Another week, another place in each.
+    giveAward(db, { awardId: 'potw', period: 'w2', teamRank: 1, playerId: 'p7' })
+    // A week's code on a monthly award is still refused (the screen never sends one).
+    expect(refusal(() => giveAward(db, { awardId: 'potm', period: 'w1', teamRank: 1, playerId: 'p1' }))).toEqual(['bad-period'])
+
+    // Traded to t3 (서), p1 keeps the week he won for t1; p13, now t1's, counts for 동, whose week 2 is taken.
+    applyTrade(db, [
+      { kind: 'player', playerId: 'p1', from: 't1', to: 't3' },
+      { kind: 'player', playerId: 'p13', from: 't3', to: 't1' },
+    ])
+    expect(refusal(() => giveAward(db, { awardId: 'potw', period: 'w2', teamRank: 1, playerId: 'p13' }))).toEqual(['award-full'])
+    giveAward(db, { awardId: 'potw', period: 'w2', teamRank: 1, playerId: 'p1' })
+    expect(listAwards(db, season).map((a) => [a.period, a.playerId, a.teamId, a.group])).toEqual([
+      ['w1', 'p1', 't1', 'east'],
+      ['w1', 'p13', 't3', 'west'],
+      ['w2', 'p7', 't2', 'east'],
+      ['w2', 'p1', 't3', 'west'],
+    ])
+    // The news says where it was given, so writers say "서 이주의 선수"; taking one back says so too.
+    expect(listEvents(db, 'award_given').map((e) => e.payload)).toContainEqual({ awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p13', group: 'west' })
+    removeAward(db, listAwards(db, season).find((a) => a.playerId === 'p13')!.id)
+    expect(listEvents(db, 'award_removed').at(-1)!.payload).toEqual({ awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p13', group: 'west' })
+    // A league-wide award's news has no group.
+    giveAward(db, { awardId: 'potm', period: 'm1', teamRank: 1, playerId: 'p7' })
+    expect(listEvents(db, 'award_given').at(-1)!.payload).toEqual({ awardId: 'potm', period: 'm1', teamRank: 1, playerId: 'p7' })
+  })
+
+  it('gives one per division the same way, and still one place per player a period', () => {
+    const db = league((s) => {
+      s.config.awards.periodic[0]!.scope = 'division'
+      s.config.awards.periodic[0]!.winners = 2
+    })
+    startSeason(db)
+    // t1 (p1, p2) and t5 (p25) are 북; t2 (p7) is 남.
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p1' })
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p25' })
+    expect(refusal(() => giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p2' }))).toEqual(['award-full'])
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p7' })
+    expect(refusal(() => giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p7' }))).toEqual(['award-duplicate'])
+    expect(listAwards(db, currentSeason(db).id).map((a) => [a.playerId, a.group])).toEqual([
+      ['p1', 'n'],
+      ['p25', 'n'],
+      ['p7', 's'],
+    ])
+  })
+
+  it('counts per conference as league-wide when the league has one conference', () => {
+    const db = league((s) => {
+      s.config.structure.conferences = [{ id: 'east', name: '동' }]
+      for (const d of s.config.structure.divisions) d.conferenceId = 'east'
+      s.config.season.playoffs = { ...s.config.season.playoffs, bracket: 'league', finals: { kind: 'none', bestOf: 7 } }
+      s.config.awards.periodic[0]!.scope = 'conference'
+    })
+    startSeason(db)
+    giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p1' })
+    // p13 is t3's, in another division of the same (only) conference: the week is taken.
+    expect(refusal(() => giveAward(db, { awardId: 'potw', period: 'w1', teamRank: 1, playerId: 'p13' }))).toEqual(['award-full'])
+    expect(listAwards(db, currentSeason(db).id)[0]!.group).toBeNull()
+  })
+
   it('moves an award back with its winner when the trade he was in is vetoed', () => {
     const db = league()
     startSeason(db)
@@ -605,6 +682,23 @@ describe('past seasons, reviewed', () => {
     giveAward(db, { awardId: 'all-league', period: '', teamRank: 1, playerId: 'p3' })
     const teams = new Map(listAwards(db, currentSeason(db).id).map((a) => [a.playerId, a.teamId]))
     expect(teams).toEqual(new Map([['p2', 't1'], ['p43', 't8'], ['p3', 't1']]))
+  })
+
+  it('counts a monthly award given in the draft in the conference of the school he finished the season with', () => {
+    const db = league((s) => void (s.config.awards.periodic[1]!.scope = 'conference'))
+    playSeason(db)
+    closeProtection(db)
+    const next = draftView(db).next!
+    // The swap sends p2 from t1 (동) to t8 (서), and p43 the other way.
+    draftMove(db, { kind: 'swap', teamId: 't8', cardId: next.id, playerId: 'p43', targetPlayerId: 'p2' })
+    giveAward(db, { awardId: 'potm', period: 'm7', teamRank: 1, playerId: 'p2' })
+    // 동's 4월 is his (t1's); p25 (t5, 동) can't have it too, while p43 takes 서's for t8.
+    expect(refusal(() => giveAward(db, { awardId: 'potm', period: 'm7', teamRank: 1, playerId: 'p25' }))).toEqual(['award-full'])
+    giveAward(db, { awardId: 'potm', period: 'm7', teamRank: 1, playerId: 'p43' })
+    expect(listAwards(db, currentSeason(db).id).map((a) => [a.playerId, a.teamId, a.group])).toEqual([
+      ['p2', 't1', 'east'],
+      ['p43', 't8', 'west'],
+    ])
   })
 
   it('lists every card a past season had, through two carry-overs, with who held it when it ended', () => {

@@ -1,3 +1,5 @@
+import { awardLabel } from '@shared/awards'
+
 /** Locker room and player moods (merged into ko as `mood`). */
 export const moodText = {
   title: '라커룸',
@@ -67,7 +69,8 @@ export const moodText = {
     draft: (from: string, to: string) => `드래프트: ${from} → ${to}`,
     slot: (from: string, to: string, rotation: 'up' | 'down' | null) => `포지션: ${from} → ${to}${rotation ? (rotation === 'up' ? ' (주전으로)' : ' (벤치로)') : ''}`,
     vetoed: '거부권으로 취소',
-    award: (name: string, period: string, rank: number) => `수상: ${name}${period ? ` (${period})` : ''}${rank > 1 ? ` ${rank}팀` : ''}`,
+    /** "수상: 3주차 동부 이주의 선수", "수상: 올-리그 팀 2팀": the period said as a week or a month, never its code. */
+    award: (name: string, period: string, rank: number, group = '') => `수상: ${awardLabel({ award: name, period, group })}${rank > 1 ? ` ${rank}팀` : ''}`,
     awardRemoved: '취소됨',
     mood: (from: string, to: string) => `기분: ${from} → ${to}`,
     wanting: (n: number) => `떠나고 싶은 마음이 커짐 (${n})`,

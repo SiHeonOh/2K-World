@@ -1,3 +1,4 @@
+import { groupName } from '@shared/awards'
 import type { EventPayloads } from '@shared/events'
 import type { MoodBand, MoodPartName, PlayerStateView, PlayerTimelineItem } from '@shared/mood'
 import { rotationMove } from '@shared/roster'
@@ -80,6 +81,8 @@ export function playerState(league: League, playerId: string, seasonId?: number)
         at: e.created_at,
         award: awardName.get(x.awardId as string) ?? (x.awardId as string),
         period: (x.period as string) ?? '',
+        // The conference or division it was given in, as the event keeps it.
+        group: groupName(config.structure, x.group as string | undefined),
         teamRank: (x.teamRank as number) ?? 1,
         removed: false,
       })

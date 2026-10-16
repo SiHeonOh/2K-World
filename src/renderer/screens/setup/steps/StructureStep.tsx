@@ -17,6 +17,20 @@ function fitPlayoffs(s: WizardState) {
   }
 }
 
+/**
+ * Weekly and monthly awards go per conference once the league has two (as
+ * the NBA's do), and back to league-wide below that. Only when the count
+ * crosses two, so a scope picked by hand stays while conferences are added.
+ */
+function fitAwardScopes(s: WizardState, before: number) {
+  const n = s.setup.config.structure.conferences.length
+  if ((before >= 2) === (n >= 2)) return
+  for (const a of s.setup.config.awards.periodic) {
+    if (n >= 2 && a.scope === 'league') a.scope = 'conference'
+    else if (n < 2 && a.scope === 'conference') a.scope = 'league'
+  }
+}
+
 function newId(prefix: string, taken: string[]): string {
   for (let n = 1; ; n++) if (!taken.includes(`${prefix}${n}`)) return `${prefix}${n}`
 }
@@ -25,8 +39,10 @@ function newId(prefix: string, taken: string[]): string {
  * Conferences: add, rename, reorder, remove. `autoFit` keeps the playoff
  * format fitting the conference count (off in 리그 설정 when the playoff
  * format can't change now: the setup check says what no longer fits instead).
+ * `fitAwards` does the same for weekly and monthly awards' scope (the wizard
+ * only: in 리그 설정 a league keeps the scope it has until you change it).
  */
-export function ConferencesCard({ state, edit, autoFit = true }: { state: WizardState; edit: Edit; autoFit?: boolean }) {
+export function ConferencesCard({ state, edit, autoFit = true, fitAwards = true }: { state: WizardState; edit: Edit; autoFit?: boolean; fitAwards?: boolean }) {
   const { config, teams } = state.setup
   const { conferences, divisions } = config.structure
   return (
@@ -38,8 +54,10 @@ export function ConferencesCard({ state, edit, autoFit = true }: { state: Wizard
           onClick={() =>
             edit((s) => {
               const list = s.setup.config.structure.conferences
+              const before = list.length
               list.push({ id: newId('c', list.map((c) => c.id)), name: t.wizard.structure.newConference(list.length + 1) })
               if (autoFit) fitPlayoffs(s)
+              if (fitAwards) fitAwardScopes(s, before)
             })
           }
         >
@@ -65,9 +83,11 @@ export function ConferencesCard({ state, edit, autoFit = true }: { state: Wizard
               onRemove={() =>
                 edit((s) => {
                   const st = s.setup.config.structure
+                  const before = st.conferences.length
                   st.conferences.splice(i, 1)
                   for (const d of st.divisions) if (d.conferenceId === c.id) d.conferenceId = null
                   if (autoFit) fitPlayoffs(s)
+                  if (fitAwards) fitAwardScopes(s, before)
                 })
               }
             />

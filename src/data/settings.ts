@@ -1,4 +1,5 @@
-import type { LeagueConfig, Phase } from '@shared/config/schema'
+import { groupOf } from '@shared/awards'
+import type { LeagueConfig, PeriodicAward, Phase } from '@shared/config/schema'
 import type { SeasonInfo } from '@shared/league'
 import { playedMode } from '@shared/played'
 import type { RuleIssue } from '@shared/season'
@@ -145,17 +146,40 @@ export function settingsState(db: Db): SettingsState {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 /**
+ * The most winners one group had in one period of a weekly or monthly award,
+ * counted as `award` would count them: by its scope, with these teams'
+ * divisions (a save that moves teams too is counted as it will stand).
+ */
+function mostPerGroup(db: Db, award: PeriodicAward, structure: LeagueConfig['structure'], teams: Team[]): number {
+  const division = new Map(teams.map((t) => [t.id, t.divisionId]))
+  const rows = db
+    .prepare(
+      `SELECT a.season_id, a.period, a.team_rank, COALESCE(a.team_id, p.team_id) AS team_id
+       FROM awards a LEFT JOIN players p ON p.id = a.player_id WHERE a.award_id = ?`,
+    )
+    .all(award.id) as { season_id: number; period: string; team_rank: number; team_id: string | null }[]
+  const counts = new Map<string, number>()
+  for (const r of rows) {
+    const key = JSON.stringify([r.season_id, r.period, r.team_rank, groupOf(structure, award.scope, division.get(r.team_id ?? ''))])
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return Math.max(0, ...counts.values())
+}
+
+/**
  * Award definitions that changed must still hold every time they were given:
  * a given award can't go (it'd lose its name in the history; rename it), and
- * its places, winners per place and period must still fit what was given.
+ * its places, winners per place and period must still fit what was given. So
+ * must a weekly or monthly award's scope: league-wide to per conference fits
+ * while no conference had more winners in a period than it has places.
  */
-function awardIssues(before: LeagueConfig['awards'], after: LeagueConfig['awards'], given: SettingsState['givenAwards']): RuleIssue[] {
+function awardIssues(db: Db, before: LeagueConfig['awards'], after: LeagueConfig, teams: Team[], given: SettingsState['givenAwards']): RuleIssue[] {
   const issues: RuleIssue[] = []
   const all = (a: LeagueConfig['awards']) => [...a.season, ...a.periodic]
   for (const g of given) {
     const old = all(before).find((a) => a.id === g.id)
-    const season = after.season.find((a) => a.id === g.id)
-    const periodic = after.periodic.find((a) => a.id === g.id)
+    const season = after.awards.season.find((a) => a.id === g.id)
+    const periodic = after.awards.periodic.find((a) => a.id === g.id)
     // An id left in the history from a definition removed long ago isn't this save's business.
     if (!old) continue
     if (!season && !periodic) {
@@ -170,7 +194,10 @@ function awardIssues(before: LeagueConfig['awards'], after: LeagueConfig['awards
       fits = g.maxRank <= places && g.maxPerPlace <= perPlace && g.periods.length === 0
     } else {
       const letter = periodic!.period === 'week' ? 'w' : 'm'
-      fits = g.maxRank <= 1 && g.maxPerPlace <= periodic!.winners && g.periods.every((p) => new RegExp(`^${letter}\\d+$`).test(p))
+      fits =
+        g.maxRank <= 1 &&
+        mostPerGroup(db, periodic!, after.structure, teams) <= periodic!.winners &&
+        g.periods.every((p) => new RegExp(`^${letter}\\d+$`).test(p))
     }
     if (!fits) issues.push({ code: 'settings-award-shape', params: { award: (season ?? periodic)!.name } })
   }
@@ -268,7 +295,7 @@ export function checkSettings(db: Db, input: LeagueSettingsInput): PreparedSetti
   if (changed.has('draft') && issued > 0 && c.draft.kind === 'card-swap' && guaranteedCards(c, teams.length) < issued) {
     issues.push({ code: 'settings-cards-issued', params: { count: issued } })
   }
-  if (changed.has('awards')) issues.push(...awardIssues(was.awards, c.awards, givenAwards(db)))
+  if (changed.has('awards')) issues.push(...awardIssues(db, was.awards, c, next.teams, givenAwards(db)))
   // A school's short name is its lore folder: its own file and its GM's are named after it, so no player may be.
   const playerNames = new Set(players.map((p) => folderKey(p.name)))
   for (const r of renamed) {

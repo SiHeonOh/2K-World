@@ -1,7 +1,8 @@
 // End-to-end: a whole season on the built-in (made-up) example league, in the
 // built app. Creates the league from the template, starts the season, enters a
-// score with a box score, trades, vetoes, applies a move in 2K, plays out the
-// season and playoffs, runs the draft, gives an award and exports to Excel.
+// score with a box score, gives a weekly award in each conference, trades,
+// vetoes, applies a move in 2K, plays out the season and playoffs, runs the
+// draft, gives a season award and exports to Excel.
 // Then starts season 2 and looks back at season 1 (read only), and exports
 // every season.
 // Run `npm run build` first, then `npm run e2e`. Uses a fresh temp data folder.
@@ -76,6 +77,33 @@ await step('record a game in the UI with a box score', async () => {
   await line.locator('button:has-text("기록")').click()
   await page.waitForTimeout(500)
   await shot(page, 's03-schedule')
+})
+
+await step('weekly awards: a 1주차 이주의 선수 in each conference, picked by week, never by code', async () => {
+  // The example league gives 이주의 선수 per conference (its 북부 and 남부, as an NBA league's 동부 and 서부).
+  const { config } = await invoke('leagues.snapshot', slug)
+  const conferences = config.structure.conferences
+  if (conferences.length !== 2 || config.awards.periodic.find((a) => a.id === 'potw')?.scope !== 'conference') throw new Error('the example league’s 이주의 선수 is not per conference')
+  await page.click('.nav a:has-text("시상")')
+  await page.waitForSelector('text=주간·월간 시상')
+  const card = page.locator('.card:has(h3:text-is("이주의 선수"))')
+  // Nothing given yet: the picker starts at the first week, and says it as one.
+  const picker = card.locator('select[aria-label="이주의 선수: 주기"]')
+  const picked = await picker.evaluate((s) => [s.value, s.selectedOptions[0]?.textContent])
+  if (JSON.stringify(picked) !== JSON.stringify(['w1', '1주차'])) throw new Error(`the period picker starts at ${JSON.stringify(picked)}`)
+  // One place per conference, each listing only its own schools' players.
+  for (const c of conferences) {
+    const slot = card.locator(`[role="group"][aria-label="1주차 ${c.name} 이주의 선수"]`)
+    await slot.locator('select').selectOption({ index: 1 })
+    await slot.locator('button:has-text("추가")').click()
+    await slot.locator('.badge').waitFor()
+  }
+  const given = (await invoke('awards.list', slug)).filter((a) => a.awardId === 'potw' && a.period === 'w1')
+  if (JSON.stringify(given.map((a) => a.group).sort()) !== JSON.stringify(conferences.map((c) => c.id).sort())) throw new Error(JSON.stringify(given))
+  // Both places are filled: 1주차 offers no more players.
+  if ((await card.locator('[role="group"][aria-label^="1주차 "] select').count()) > 0) throw new Error('a filled place still offers a player')
+  if ((await card.textContent()).includes('w1')) throw new Error('the card shows a period code')
+  await shot(page, 's03b-weekly-awards')
 })
 
 await step('trade, check the 2K block, veto', async () => {

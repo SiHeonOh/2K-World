@@ -1,3 +1,4 @@
+import { awardTitle } from '@shared/awards'
 import type { EventPayloads, LeagueEvent } from '@shared/events'
 import { seriesTitle, type BracketSpot } from '@shared/season'
 import { setStoryValue, storyValue } from '@data/community'
@@ -106,13 +107,6 @@ export function occasionOf(e: LeagueEvent): OccasionKind | null {
 /** '로' or '으로' after a word (로 after ㄹ too: 가람고로, 한결로, 지훈으로). */
 const toward = (word: string) => particle(word, '으로', '로')
 
-/** 'w3' → '3주차', 'm2' → '2개월차'. */
-function periodLabel(period: string): string {
-  const m = /^([wm])(\d+)$/.exec(period)
-  if (!m) return period
-  return m[1] === 'w' ? `${m[2]}주차` : `${m[2]}개월차`
-}
-
 type AwardPayload = EventPayloads['award_given']
 
 const awardKey = (a: AwardPayload) => `award:${a.awardId}:${a.period}:${a.teamRank}:${a.playerId}`
@@ -127,14 +121,16 @@ function selectionTeam(name: string, rank: number): string {
   return `${name.trim().replace(/\s*팀$/, '')} ${ORDINALS[rank - 1] ?? `${rank}번째`} 팀`
 }
 
-/** "MVP(시즌 상) — 가나다 (가람고)", "이주의 선수(주간 상, 3주차) — …": `teamId` is the school he won it for. */
+/**
+ * "MVP(시즌 상) — 가나다 (가람고)", "3주차 동부 이주의 선수(주간 상) — …": the
+ * group as it was given (the event keeps it). `teamId` is the school he won it for.
+ */
 function awardText(league: League, a: AwardPayload, teamId: string): string {
   const season = league.config.awards.season.find((x) => x.id === a.awardId)
   const periodic = league.config.awards.periodic.find((x) => x.id === a.awardId)
-  const base = season?.name ?? periodic?.name ?? a.awardId
-  const name = season?.kind === 'selection' ? selectionTeam(base, a.teamRank) : base
+  const name = season?.kind === 'selection' ? selectionTeam(season.name, a.teamRank) : awardTitle(league.config, a)
   const what = season ? '시즌 상' : periodic?.period === 'month' ? '월간 상' : '주간 상'
-  return `${name}(${what}${a.period ? `, ${periodLabel(a.period)}` : ''}) — ${playerName(league, a.playerId)} (${short(league, teamId)})`
+  return `${name}(${what}) — ${playerName(league, a.playerId)} (${short(league, teamId)})`
 }
 
 /** The school a player won an award for: kept with the award (a move since doesn't change it), or his school now. */

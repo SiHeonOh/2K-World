@@ -6,8 +6,8 @@ import * as XLSX from 'xlsx'
 import { defaultCardSwap } from '@shared/config/defaults'
 import { sampleSetup } from '@shared/testing/fixtures'
 import { openDb, type Db } from '@data/db'
-import { currentSeason, seedLeague } from '@data/league'
-import { applyTrade, closeProtection, draftMove, finishDraft, listCards, startNextSeason } from '@data/moves'
+import { currentSeason, loadConfig, seedLeague, updateConfig } from '@data/league'
+import { applyTrade, closeProtection, draftMove, finishDraft, giveAward, listCards, startNextSeason } from '@data/moves'
 import { finishPlayoffs, listGames, recordScore, startPlayoffs, startSeason } from '@data/season'
 import { exportLeague, localDate } from './exporter'
 
@@ -122,6 +122,24 @@ describe('the Excel export, every season', () => {
       if (tz === undefined) delete process.env.TZ
       else process.env.TZ = tz
     }
+  })
+
+  it('names each award with its group, and its period as the screens say it (3주차, 11월), never its code', () => {
+    const { config } = loadConfig(db)
+    config.awards.periodic[0]!.scope = 'conference'
+    updateConfig(db, config)
+    startSeason(db)
+    // p13 plays for t3 (서), p1 for t1, p7 for t2; 이달의 선수 stays league-wide.
+    giveAward(db, { awardId: 'potw', period: 'w3', teamRank: 1, playerId: 'p13' })
+    giveAward(db, { awardId: 'potm', period: 'm2', teamRank: 1, playerId: 'p1' })
+    giveAward(db, { awardId: 'all-league', period: '', teamRank: 2, playerId: 'p7' })
+    const awards = sheets(exportLeague(db, dir, 'demo', LABELS))('awards')
+    expect(awards).toEqual([
+      ['award', 'period', 'teamRank', 'player', '팀'],
+      ['올-리그 팀', '', 2, '나가나', '나람고'],
+      ['이달의 선수', '11월', 1, '가가가', '가람고'],
+      ['서 이주의 선수', '3주차', 1, '다가다', '다람고'],
+    ])
   })
 
   it('names a season-1 card with its season in a current-season export too', () => {

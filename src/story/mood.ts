@@ -96,7 +96,7 @@ export function lockerRoom(league: League, teamId: string, feelings: Map<string,
   const line = view.overall.find((s) => s.teamId === teamId)
   const played = line ? line.wins + line.losses : 0
   const streak = line?.streak ? (line.streak.startsWith('W') ? 1 : -1) * Number(line.streak.slice(1)) : 0
-  const awards = listAwards(db, season.id)
+  const awards = listAwards(db, season.id, config)
   const events = listEvents(db).filter((e) => e.seasonId === season.id)
   const teamGameTimes = (db.prepare("SELECT recorded_at FROM games WHERE season_id = ? AND status = 'final' AND (home_id = ? OR away_id = ?) ORDER BY recorded_at").all(season.id, teamId, teamId) as { recorded_at: string }[]).map((r) => r.recorded_at)
   /** 1 right after an event, fading to 0 over the team's next few games. */

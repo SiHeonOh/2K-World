@@ -220,7 +220,14 @@ export const periodicAwardSchema = z.object({
   id: idSchema,
   name: nameSchema,
   period: z.enum(['week', 'month']),
+  /** Winners each period, in each group the scope makes. */
   winners: int(1, 10),
+  /**
+   * Who it's given among: the whole league, or each conference or division
+   * apart (the NBA's 이주의 선수 is one per conference; see shared/awards.ts).
+   * Added after config v4 with a default, so an older config reads as league-wide.
+   */
+  scope: z.enum(['league', 'conference', 'division']).default('league'),
 })
 
 export const awardsSchema = z.object({

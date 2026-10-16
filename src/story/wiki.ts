@@ -1,4 +1,5 @@
-import type { LeagueConfig } from '@shared/config/schema'
+import { scopeIn } from '@shared/awards'
+import type { LeagueConfig, PeriodicAward } from '@shared/config/schema'
 import { splitWikiSections } from '@shared/namumark'
 import { setStoryValue, storyValue } from '@data/community'
 import type { Db } from '@data/db'
@@ -429,6 +430,15 @@ function rulesPage(config: LeagueConfig, titles: WikiTitles): string {
   ].join('\n')
 }
 
+/** A weekly or monthly award as the 시상 page lists it: when, and among whom ("이주의 선수: 매주 동부·서부에서 1명씩"). */
+function periodicLine(config: LeagueConfig, a: PeriodicAward): string {
+  const when = a.period === 'week' ? '매주' : '매달'
+  const scope = scopeIn(config.structure, a.scope)
+  if (scope === 'league') return `${a.name}: ${when} ${a.winners}명`
+  const groups = (scope === 'conference' ? config.structure.conferences : config.structure.divisions).map((g) => g.name)
+  return `${a.name}: ${when} ${groups.join('·')}에서 ${a.winners}명씩`
+}
+
 function awardsPage(config: LeagueConfig, titles: WikiTitles): string {
   return [
     '[목차]',
@@ -436,7 +446,7 @@ function awardsPage(config: LeagueConfig, titles: WikiTitles): string {
     `[[${titles.league}]]의 상 목록과 역대 수상자.`,
     '== 시즌 상 ==',
     bullets(config.awards.season.map((a) => a.name)),
-    ...(config.awards.periodic.length ? ['== 주간·월간 상 ==', bullets(config.awards.periodic.map((a) => a.name))] : []),
+    ...(config.awards.periodic.length ? ['== 주간·월간 상 ==', bullets(config.awards.periodic.map((a) => periodicLine(config, a)))] : []),
     '== 수상자 ==',
     '[기록]',
     '[[분류:리그]]',

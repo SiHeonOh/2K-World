@@ -55,8 +55,9 @@ export interface EventPayloads {
     targetSlot: string | null
   }
   draft_pass: { actionId: number; teamId: string; cardId: number }
-  award_given: { awardId: string; period: string; teamRank: number; playerId: string }
-  award_removed: { awardId: string; period: string; teamRank: number; playerId: string }
+  /** group: the conference or division it was given in (a weekly or monthly award given per group); left out when league-wide. */
+  award_given: { awardId: string; period: string; teamRank: number; playerId: string; group?: string }
+  award_removed: { awardId: string; period: string; teamRank: number; playerId: string; group?: string }
   /** News you typed in the 뉴스 box. It changes no facts; teams and players are the ones it names. */
   news_posted: { text: string; teams: string[]; players: string[] }
   /** A player's wish to leave crossed its line (derived from his lasting feelings, not a fact change). */

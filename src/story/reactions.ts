@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { JobKind, JobRow } from '@ai/queue'
 import { playerValue } from '@core/value'
 import { loreBlock } from '@lore/folder'
+import { awardTitle } from '@shared/awards'
 import { type ModelName, aiFor, type EffortLevel } from '@shared/config/schema'
 import type { EventPayloads, EventType, LeagueEvent } from '@shared/events'
 import type { PlayerFeelingsView } from '@shared/mood'
@@ -143,7 +144,6 @@ export function reactionPicks(league: League, events: LeagueEvent[], limit = PER
     if (!mood) p.moved = true
     picks.set(playerId, p)
   }
-  const awards = [...league.config.awards.season, ...league.config.awards.periodic]
   for (const e of events) {
     const x = e.payload as Record<string, unknown>
     if (e.type === 'mood_changed') {
@@ -176,8 +176,8 @@ export function reactionPicks(league: League, events: LeagueEvent[], limit = PER
       add(x.playerId as string, `드래프트에서 ${short(league, x.targetTeamId as string)}(으)로 보내짐`, 1 + (value.get(x.playerId as string) ?? 0) / 50)
       add(x.targetPlayerId as string, `드래프트에서 ${short(league, x.teamId as string)}에 지명돼 이적`, 1.2 + (value.get(x.targetPlayerId as string) ?? 0) / 50)
     } else if (e.type === 'award_given' && !(x.period as string)) {
-      // Season awards only; weekly and monthly ones come too often to each get a quote.
-      const name = awards.find((a) => a.id === x.awardId)?.name ?? (x.awardId as string)
+      // Season awards only; weekly and monthly ones come too often to each get a quote. Named as every screen names it.
+      const name = awardTitle(league.config, x as EventPayloads['award_given'])
       add(x.playerId as string, `${name}${(x.teamRank as number) > 1 ? ` ${x.teamRank as number}팀` : ''} 수상`, 2.5)
     }
   }

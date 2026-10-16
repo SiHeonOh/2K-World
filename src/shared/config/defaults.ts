@@ -94,9 +94,10 @@ export function defaultConfig(): LeagueConfig {
         { id: 'all-league', name: '올-리그 팀', kind: 'selection', teams: 3, perTeam: 5, timing: 'regular-season' },
         { id: 'finals-mvp', name: '파이널 MVP', kind: 'player', teams: 1, perTeam: 1, timing: 'finals' },
       ],
+      // League-wide: a new league has no conferences yet (the wizard goes per conference once it has two).
       periodic: [
-        { id: 'potw', name: '이주의 선수', period: 'week', winners: 1 },
-        { id: 'potm', name: '이달의 선수', period: 'month', winners: 1 },
+        { id: 'potw', name: '이주의 선수', period: 'week', winners: 1, scope: 'league' },
+        { id: 'potm', name: '이달의 선수', period: 'month', winners: 1, scope: 'league' },
       ],
     },
     trades: {

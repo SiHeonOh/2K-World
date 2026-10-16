@@ -144,7 +144,7 @@ export function LeagueSettings() {
       </Section>
 
       <Section {...sectionProps('structure')}>
-        <ConferencesCard state={draft} edit={edit} autoFit={locks?.locks.playoffs.open ?? false} />
+        <ConferencesCard state={draft} edit={edit} autoFit={locks?.locks.playoffs.open ?? false} fitAwards={false} />
         <DivisionsCard state={draft} edit={edit} />
       </Section>
 

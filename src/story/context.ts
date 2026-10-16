@@ -6,6 +6,7 @@ import type { EventPayloads, LeagueEvent } from '@shared/events'
 import { lastEventId, listPersonas, memoriesOf, personaCount, savePersonas, type PersonaRow } from '@data/community'
 import { jsonField, type Db } from '@data/db'
 import { flagsFor, flagsOf } from '@data/flags'
+import { awardTitle } from '@shared/awards'
 import { positionOf } from '@shared/labels'
 import { tagUnverified } from '@shared/numbers'
 import { playedMode, roundLabel } from '@shared/played'
@@ -334,8 +335,6 @@ export function gameThreadInput(league: League, gameId: number, eventId: number)
 /** One line per event, in Korean, plus who's involved. */
 export function describeEvent(league: League, e: LeagueEvent): { text: string; teams: string[]; players: string[]; role: string } | null {
   const p = e.payload as Record<string, unknown>
-  const awardName = (id: string) =>
-    [...league.config.awards.season, ...league.config.awards.periodic].find((a) => a.id === id)?.name ?? id
   switch (e.type) {
     case 'trade_applied': {
       const players = (p.players as string[]) ?? []
@@ -350,10 +349,11 @@ export function describeEvent(league: League, e: LeagueEvent): { text: string; t
       }
     }
     case 'award_given': {
-      const id = p.playerId as string
-      const period = (p.period as string) ? ` (${p.period as string})` : ''
-      const rank = (p.teamRank as number) > 1 ? ` ${p.teamRank as number}팀` : ''
-      return { text: `수상: ${awardName(p.awardId as string)}${rank}${period} — ${playerName(league, id)} (${short(league, league.players.get(id)?.teamId ?? '')})`, teams: [], players: [id], role: 'main' }
+      // "수상: 3주차 동부 이주의 선수 — …": the period said as a week or a month, with the group it was given in.
+      const a = p as EventPayloads['award_given']
+      const rank = a.teamRank > 1 ? ` ${a.teamRank}팀` : ''
+      const who = `${playerName(league, a.playerId)} (${short(league, league.players.get(a.playerId)?.teamId ?? '')})`
+      return { text: `수상: ${awardTitle(league.config, a)}${rank} — ${who}`, teams: [], players: [a.playerId], role: 'main' }
     }
     case 'game_corrected': {
       const game = getGame(league.db, p.gameId as number)

@@ -281,7 +281,7 @@ function TimelineRow({ item, short }: { item: PlayerTimelineItem; short: (id: st
   } else if (item.kind === 'award') {
     body = (
       <div className={`what${item.removed ? ' vetoed' : ''}`}>
-        <span>{tp.award(item.award, item.period, item.teamRank)}</span>
+        <span>{tp.award(item.award, item.period, item.teamRank, item.group)}</span>
         {item.removed ? <Badge>{tp.awardRemoved}</Badge> : null}
       </div>
     )
@@ -378,7 +378,7 @@ function MoodChart({ v, short }: { v: PlayerStateView; short: (id: string) => st
         item.kind === 'said'
           ? [tm.channels[item.words.channel], item.words.quote, tm.actions[item.words.action]].filter(Boolean).join(' · ')
           : item.kind === 'award'
-            ? `${tp.award(item.award, item.period, item.teamRank)}${item.removed ? ` (${tp.awardRemoved})` : ''}`
+            ? `${tp.award(item.award, item.period, item.teamRank, item.group)}${item.removed ? ` (${tp.awardRemoved})` : ''}`
             : item.kind === 'trade' || item.kind === 'draft'
               ? `${(item.kind === 'trade' ? tp.trade : tp.draft)(short(item.from), short(item.to))}${item.vetoed ? ` (${tp.vetoed})` : ''}`
               : item.kind === 'slot'

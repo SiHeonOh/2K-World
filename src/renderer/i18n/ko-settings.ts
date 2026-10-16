@@ -92,7 +92,7 @@ export const leagueSettingsText = {
     'settings-draft-kind': () => '드래프트 방식(없음·카드 스왑)은 시즌 전이나 비시즌에만 바꿀 수 있어요',
     'settings-cards-issued': (p: P) => `이번 시즌 팀마다 카드 ${p.count}장을 이미 나눠 줬어요. 가장 적게 받는 순위의 카드를 ${p.count}장보다 줄일 수 없어요`,
     'settings-award-given': (p: P) => `'${p.award}'은(는) 이미 준 상이라 지울 수 없어요. 이름은 바꿀 수 있어요`,
-    'settings-award-shape': (p: P) => `'${p.award}'은(는) 이미 준 기록이 새 설정(팀 수·인원·주기)에 맞지 않아요. 이름은 바꿀 수 있어요`,
+    'settings-award-shape': (p: P) => `'${p.award}'은(는) 이미 준 기록이 새 설정(팀 수·인원·주기·대상)에 맞지 않아요. 이름은 바꿀 수 있어요`,
     'settings-freeze-cards': (p: P) =>
       `${p.team}은(는) 이번 시즌 다른 팀과 카드를 주고받아서 동결할 수 없어요 (동결된 팀은 드래프트에서 빠져 그 카드를 쓸 수 없어요). 카드 트레이드를 되돌린 뒤 동결해 주세요`,
     'settings-team-name-player': (p: P) => `'${p.name}'은(는) 선수 이름과 같아서 학교 표시 이름으로 쓸 수 없어요 (로어 파일 이름이 겹쳐요)`,

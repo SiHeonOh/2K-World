@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import type { Phase } from '@shared/config/schema'
+import { groupName, groupOf } from '@shared/awards'
+import type { LeagueConfig, Phase } from '@shared/config/schema'
 import type { EventPayloads } from '@shared/events'
 import type { AwardRow, CardRow, ChecklistRow, DraftActionRow, DraftView, TradeRow } from '@shared/season'
 import {
@@ -723,15 +724,29 @@ export function startNextSeason(db: Db, label: string): number {
 
 // ── Awards ───────────────────────────────────────────────────────────────
 
-export function listAwards(db: Db, seasonId: number): AwardRow[] {
+/** Each team's division: where its winners count for an award given per conference or division. */
+function teamDivisions(db: Db): Map<string, string> {
+  const rows = db.prepare('SELECT id, division_id FROM teams').all() as { id: string; division_id: string }[]
+  return new Map(rows.map((t) => [t.id, t.division_id]))
+}
+
+/** The group an award won for this team counts in (its conference or division, by the award's scope); null for a season award or a league-wide one. */
+function awardGroup(config: LeagueConfig, divisions: ReadonlyMap<string, string>, awardId: string, teamId: string | null): string | null {
+  const periodic = config.awards.periodic.find((a) => a.id === awardId)
+  return periodic ? groupOf(config.structure, periodic.scope, divisions.get(teamId ?? '')) : null
+}
+
+/** A season's awards, each period in order (w2 before w10). Pass the config when it's at hand. */
+export function listAwards(db: Db, seasonId: number, config: LeagueConfig = loadConfig(db).config): AwardRow[] {
   // Past rosters aren't stored: each award keeps the team he was on when it was given.
   const rows = db
     .prepare(
       `SELECT a.id, a.award_id, a.period, a.team_rank, a.player_id, COALESCE(a.team_id, p.team_id) AS team_id
        FROM awards a LEFT JOIN players p ON p.id = a.player_id
-       WHERE a.season_id = ? ORDER BY a.award_id, a.period, a.team_rank, a.id`,
+       WHERE a.season_id = ? ORDER BY a.award_id, CAST(substr(a.period, 2) AS INTEGER), a.period, a.team_rank, a.id`,
     )
     .all(seasonId) as { id: number; award_id: string; period: string; team_rank: number; player_id: string; team_id: string | null }[]
+  const divisions = teamDivisions(db)
   return rows.map((r) => ({
     id: r.id,
     awardId: r.award_id,
@@ -739,6 +754,7 @@ export function listAwards(db: Db, seasonId: number): AwardRow[] {
     teamRank: r.team_rank,
     playerId: r.player_id,
     teamId: r.team_id ?? '',
+    group: awardGroup(config, divisions, r.award_id, r.team_id),
   }))
 }
 
@@ -750,7 +766,7 @@ export function giveAward(db: Db, input: { awardId: string; period: string; team
   if (!seasonAward && !periodic) refuse('unknown-award', { award: input.awardId })
   if (seasonAward && input.period !== '') refuse('bad-period')
   if (periodic) {
-    // w1, w2… for weekly awards; m1, m2… for monthly ones.
+    // w1, w2… for weekly awards; m1, m2… for monthly ones (10월 first: see shared/awards.ts).
     const m = input.period.match(/^([wm])(\d{1,3})$/)
     if (!m || m[1] !== (periodic.period === 'week' ? 'w' : 'm') || Number(m[2]) < 1) refuse('bad-period')
   }
@@ -760,25 +776,35 @@ export function giveAward(db: Db, input: { awardId: string; period: string; team
   if (!Number.isInteger(input.teamRank) || input.teamRank < 1 || input.teamRank > maxRank) refuse('bad-rank')
   const player = db.prepare('SELECT team_id FROM players WHERE id = ?').get(input.playerId) as { team_id: string } | undefined
   if (!player) refuse('unknown-player', { player: input.playerId })
+  // Kept with the award, so a trade or a draft swap later doesn't change whom he won it for.
+  const teamId = ['draft', 'offseason'].includes(season.phase) ? teamWhenGamesEnded(db, season.id, input.playerId, player.team_id) : player.team_id
+  // Given per conference or division, each group fills its own places: his is the one of the school he won it for.
+  const divisions = teamDivisions(db)
+  const group = awardGroup(config, divisions, input.awardId, teamId)
   const limit = seasonAward ? (seasonAward.kind === 'selection' ? seasonAward.perTeam : 1) : periodic!.winners
-  const already = db
-    .prepare('SELECT COUNT(*) AS n FROM awards WHERE season_id = ? AND award_id = ? AND period = ? AND team_rank = ?')
-    .get(season.id, input.awardId, input.period, input.teamRank) as { n: number }
-  if (already.n >= limit) refuse('award-full', { limit })
+  const placed = db
+    .prepare(
+      `SELECT COALESCE(a.team_id, p.team_id) AS team_id FROM awards a LEFT JOIN players p ON p.id = a.player_id
+       WHERE a.season_id = ? AND a.award_id = ? AND a.period = ? AND a.team_rank = ?`,
+    )
+    .all(season.id, input.awardId, input.period, input.teamRank) as { team_id: string | null }[]
+  if (placed.filter((r) => awardGroup(config, divisions, input.awardId, r.team_id) === group).length >= limit) {
+    refuse('award-full', group ? { limit, group: groupName(config.structure, group) } : { limit })
+  }
   // One place per player per award and period (no 1st and 2nd team both).
   const twice = db
     .prepare('SELECT COUNT(*) AS n FROM awards WHERE season_id = ? AND award_id = ? AND period = ? AND player_id = ?')
     .get(season.id, input.awardId, input.period, input.playerId) as { n: number }
   if (twice.n > 0) refuse('award-duplicate')
-  // Kept with the award, so a trade or a draft swap later doesn't change whom he won it for.
-  const teamId = ['draft', 'offseason'].includes(season.phase) ? teamWhenGamesEnded(db, season.id, input.playerId, player.team_id) : player.team_id
   return transaction(db, () => {
     const id = Number(
       db
         .prepare('INSERT INTO awards (season_id, award_id, period, team_rank, player_id, team_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(season.id, input.awardId, input.period, input.teamRank, input.playerId, teamId, now()).lastInsertRowid,
     )
-    appendEvent(db, 'award_given', input, season.id)
+    // The group goes with the news, so writers say "동부 이주의 선수".
+    const { awardId, period, teamRank, playerId } = input
+    appendEvent(db, 'award_given', { awardId, period, teamRank, playerId, ...(group ? { group } : {}) }, season.id)
     return id
   })
 }
@@ -816,14 +842,24 @@ function teamWhenGamesEnded(db: Db, seasonId: number, playerId: string, teamNow:
 }
 
 export function removeAward(db: Db, id: number): void {
-  const row = db.prepare('SELECT season_id, award_id, period, team_rank, player_id FROM awards WHERE id = ?').get(id) as
-    | { season_id: number; award_id: string; period: string; team_rank: number; player_id: string }
-    | undefined
+  const row = db
+    .prepare(
+      `SELECT a.season_id, a.award_id, a.period, a.team_rank, a.player_id, COALESCE(a.team_id, p.team_id) AS team_id
+       FROM awards a LEFT JOIN players p ON p.id = a.player_id WHERE a.id = ?`,
+    )
+    .get(id) as { season_id: number; award_id: string; period: string; team_rank: number; player_id: string; team_id: string | null } | undefined
   if (!row) refuse('unknown-award', { award: id })
   // A past season is over, like its results.
   if (row.season_id !== currentSeason(db).id) refuse('past-season-award')
+  // The news names the group it was given in, as the award's did.
+  const group = awardGroup(loadConfig(db).config, teamDivisions(db), row.award_id, row.team_id)
   transaction(db, () => {
     db.prepare('DELETE FROM awards WHERE id = ?').run(id)
-    appendEvent(db, 'award_removed', { awardId: row.award_id, period: row.period, teamRank: row.team_rank, playerId: row.player_id }, row.season_id)
+    appendEvent(
+      db,
+      'award_removed',
+      { awardId: row.award_id, period: row.period, teamRank: row.team_rank, playerId: row.player_id, ...(group ? { group } : {}) },
+      row.season_id,
+    )
   })
 }

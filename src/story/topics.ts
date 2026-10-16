@@ -618,7 +618,7 @@ const MAKERS: Record<TopicKind, Maker> = {
       .slice(0, 8)
     const options = shuffle(top, c.random).slice(0, 4)
     if (options.length < 3) return null
-    const awards = listAwards(c.league.db, currentSeason(c.league.db).id).length
+    const awards = listAwards(c.league.db, currentSeason(c.league.db).id, c.league.config).length
     const question = c.pick(['올시즌 MVP는?', '같이 뛰고 싶은 선수는?', '제일 과대평가된 선수는?', '클러치에 공 줄 선수는?'])!
     const labels = options.map((p) => `${p.name}(${c.short(p.teamId)})`)
     return {

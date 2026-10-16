@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
 import { openDb, type Db } from '@data/db'
-import { listPlayers, listTeams, loadConfig, seedLeague } from '@data/league'
+import { listPlayers, listTeams, loadConfig, seedLeague, updateConfig } from '@data/league'
+import { giveAward } from '@data/moves'
 import { updatePlayers } from '@data/roster'
 import { listGames, recordScore, startSeason } from '@data/season'
 import { pageByRef, pageByTitle, revisionBody, saveRevision, sectionsYouOwn } from '@data/wiki'
@@ -73,6 +74,32 @@ describe('WikiService', () => {
     expect(playerPage.data.infobox?.rows[0]).toMatchObject({ label: '소속', value: team.name, link: team.shortName })
     expect(playerPage.data.record?.rows[0]?.cells.slice(2, 4)).toEqual(['1', '33.0'])
     expect(playerPage.data.history.map((h) => h.text)).toEqual([expect.stringContaining('33점')])
+  })
+
+  it('names weekly and monthly awards by period and group: the 시상 page, his infobox and his history', () => {
+    // 이주의 선수 per conference (the sample's are 동 and 서), 이달의 선수 league-wide.
+    const { config } = loadConfig(db)
+    config.awards.periodic[0]!.scope = 'conference'
+    updateConfig(db, config)
+    wiki.ensure(db, dir, true)
+    startSeason(db)
+    // p2 plays for t1 (동).
+    giveAward(db, { awardId: 'potw', period: 'w3', teamRank: 1, playerId: 'p2' })
+    giveAward(db, { awardId: 'potw', period: 'w10', teamRank: 1, playerId: 'p2' })
+    giveAward(db, { awardId: 'potm', period: 'm2', teamRank: 1, playerId: 'p2' })
+    const awards = wiki.page(db, dir, `${config.league.name}/시상`)
+    expect(awards.source).toContain(' * 이주의 선수: 매주 동·서에서 1명씩')
+    expect(awards.source).toContain(' * 이달의 선수: 매달 1명')
+    const name = listPlayers(db).find((p) => p.id === 'p2')!.name
+    expect(awards.data.record?.rows.map((r) => r.cells)).toEqual([
+      ['시즌 1', '이달의 선수', '11월', name],
+      ['시즌 1', '동 이주의 선수', '3주차', name],
+      ['시즌 1', '동 이주의 선수', '10주차', name],
+    ])
+    const title = (db.prepare("SELECT title FROM wiki_pages WHERE kind = 'player' AND ref_id = ?").get('p2') as { title: string }).title
+    const page = wiki.page(db, dir, title)
+    expect(page.data.infobox?.rows.find((r) => r.label === '수상')?.value).toBe('이달의 선수, 동 이주의 선수 2회')
+    expect(page.data.history.map((h) => h.text)).toEqual(['수상: 3주차 동 이주의 선수', '수상: 10주차 동 이주의 선수', '수상: 11월 이달의 선수'])
   })
 
   it('a lineup change shows live in the infobox; going to the bench goes in his history, PG to SG doesn’t', () => {

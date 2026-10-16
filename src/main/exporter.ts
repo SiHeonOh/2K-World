@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as XLSX from 'xlsx'
 import type { ExportLabels, ExportScope } from '@shared/api'
+import { awardTitle, periodLabel } from '@shared/awards'
 import { seasonTotals } from '@core/stats'
 import type { Db } from '@data/db'
 import { currentSeason, listPlayers, listSeasons, listTeams, loadConfig } from '@data/league'
@@ -180,12 +181,18 @@ export function exportLeague(db: Db, leagueFolder: string, slug: string, labels:
     )
   }
 
-  // His team is the one he won it for, kept with the award.
-  const awardName = new Map([...config.awards.season, ...config.awards.periodic].map((a) => [a.id, a.name]))
+  // His team is the one he won it for, kept with the award. The award is named with its group ("동부 이주의 선수"),
+  // and its period said the way screens say it (3주차, 11월), never as its code.
   add(
     L('awards'),
     perSeason([L('award'), L('period'), L('teamRank'), L('player'), L('team')], (s) =>
-      listAwards(db, s.id).map((a) => [awardName.get(a.awardId) ?? a.awardId, a.period, a.teamRank, playerName.get(a.playerId), teamName.get(a.teamId) ?? '']),
+      listAwards(db, s.id, config).map((a) => [
+        awardTitle(config, { awardId: a.awardId, group: a.group }),
+        periodLabel(a.period),
+        a.teamRank,
+        playerName.get(a.playerId),
+        teamName.get(a.teamId) ?? '',
+      ]),
     ),
   )
 

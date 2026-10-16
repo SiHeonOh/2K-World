@@ -1,17 +1,21 @@
 import { useMemo, useState } from 'react'
+import { awardGroups, awardLabel, awardTitle, byPeriod, groupOf, periodChoices, periodLabel, type AwardGroup } from '@shared/awards'
+import type { PeriodicAward as PeriodicAwardConfig } from '@shared/config/schema'
 import type { AwardRow } from '@shared/season'
 import { call } from '../../api'
-import { Loading, Select, TextInput } from '../../components/ui'
+import { Loading, Select } from '../../components/ui'
 import { useLoad } from '../../hooks'
 import { t } from '../../i18n'
 import { useLeague } from './LeagueLayout'
 import { RuleErrors } from './RuleErrors'
 import { PastSeasonNotice, SeasonPicker, useSeasonPick } from './SeasonPicker'
 
-/** Player labels ("name (team)") by id, and the picker's options, built once per snapshot. */
+type Option = { value: string; label: string }
+
+/** Player labels ("name (team)") and the pickers' options, built once per snapshot. */
 interface Picker {
-  names: Map<string, string>
-  options: { value: string; label: string }[]
+  /** Every player to pick from, or only those whose school passes `only` (one conference's or division's). */
+  options: (only?: (teamId: string) => boolean) => Option[]
   /** A winner's label, with the team he won it for (kept with the award). */
   winner: (row: AwardRow) => string
 }
@@ -22,20 +26,20 @@ export function Awards() {
   // A past season's awards can be looked at, not given or taken back.
   const season = useSeasonPick()
   const readOnly = season.past
-  // Kept while refetching, so the slots (and the period fields) stay mounted after give/remove.
+  // Kept while refetching, so the slots (and the period pickers) stay mounted after give/remove.
   const list = useLoad(() => call('awards.list', league.slug, season.arg), [`${league.slug}:${season.seasonId}`, tick], { keepPrevious: true })
   const [error, setError] = useState<unknown>(null)
-  const { awards } = league.config
+  const { awards, structure } = league.config
   const picker = useMemo((): Picker => {
     const teams = new Map(league.teams.map((tm) => [tm.id, tm.shortName]))
     const players = new Map(league.players.map((p) => [p.id, p.name]))
-    const names = new Map(league.players.map((p) => [p.id, `${p.name} (${teams.get(p.teamId) ?? ''})`]))
+    const all = league.players.map((p) => ({ teamId: p.teamId, value: p.id, label: `${p.name} (${teams.get(p.teamId) ?? ''})` }))
     return {
-      names,
-      options: [{ value: '', label: t.awards.pickPlayer }, ...[...names].map(([value, label]) => ({ value, label }))],
+      options: (only) => [{ value: '', label: t.awards.pickPlayer }, ...all.filter((o) => !only || only(o.teamId)).map(({ value, label }) => ({ value, label }))],
       winner: (row) => `${players.get(row.playerId) ?? row.playerId} (${teams.get(row.teamId) ?? row.teamId})`,
     }
   }, [league.teams, league.players])
+  const divisionOf = useMemo(() => new Map(league.teams.map((tm) => [tm.id, tm.divisionId])), [league.teams])
 
   const give = async (awardId: string, period: string, teamRank: number, playerId: string) => {
     setError(null)
@@ -46,11 +50,16 @@ export function Awards() {
       setError(e)
     }
   }
+  /** An award as the confirm names it: "3주차 동부 이주의 선수", "올-리그 팀 2팀". */
+  const awardText = (row: AwardRow) => {
+    const seasonAward = awards.season.find((a) => a.id === row.awardId)
+    if (seasonAward?.kind === 'selection') return `${seasonAward.name} ${t.awards.teamN(row.teamRank)}`
+    return awardTitle(league.config, row)
+  }
   const remove = async (id: number) => {
     // Taking an award back is news (the wiki gets a 수상 취소 line), so it asks first.
     const row = list.state === 'ready' ? list.value.find((r) => r.id === id) : undefined
-    const award = [...awards.season, ...awards.periodic].find((a) => a.id === row?.awardId)?.name ?? ''
-    if (!window.confirm(t.awards.confirmRemove(row?.period ? `${award} (${row.period})` : award, row ? picker.winner(row) : ''))) return
+    if (!window.confirm(t.awards.confirmRemove(row ? awardText(row) : '', row ? picker.winner(row) : ''))) return
     setError(null)
     try {
       await call('awards.remove', league.slug, id)
@@ -77,6 +86,7 @@ export function Awards() {
     )
   }
   const rows = list.value
+  const everyone = picker.options()
 
   return (
     <div className="page">
@@ -90,8 +100,10 @@ export function Awards() {
           {Array.from({ length: a.kind === 'selection' ? a.teams : 1 }, (_, i) => i + 1).map((rank) => (
             <AwardSlot
               key={rank}
-              picker={picker}
+              title={a.kind === 'selection' ? `${a.name} ${t.awards.teamN(rank)}` : a.name}
               label={a.kind === 'selection' ? t.awards.teamN(rank) : ''}
+              options={everyone}
+              winner={picker.winner}
               limit={a.kind === 'selection' ? a.perTeam : 1}
               winners={rows.filter((r) => r.awardId === a.id && r.period === '' && r.teamRank === rank)}
               readOnly={readOnly}
@@ -105,9 +117,11 @@ export function Awards() {
       {awards.periodic.map((a) => (
         <PeriodicAward
           key={a.id}
+          award={a}
           picker={picker}
-          name={a.name}
-          limit={a.winners}
+          choices={periodChoices(league.config, league.teams.length, a.period)}
+          groups={awardGroups(structure, a.scope, league.teams)}
+          groupOfTeam={(teamId) => groupOf(structure, a.scope, divisionOf.get(teamId))}
           rows={rows.filter((r) => r.awardId === a.id)}
           readOnly={readOnly}
           onGive={(period, playerId) => void give(a.id, period, 1, playerId)}
@@ -118,17 +132,22 @@ export function Awards() {
   )
 }
 
+/** One place to fill: its winners (each can be taken back) and, while there's room, a player picker. `title` names it in full for screen readers. */
 function AwardSlot({
-  picker,
+  title,
   label,
+  options,
+  winner,
   limit,
   winners,
   readOnly,
   onGive,
   onRemove,
 }: {
-  picker: Picker
+  title: string
   label: string
+  options: Option[]
+  winner: (row: AwardRow) => string
   limit: number
   winners: AwardRow[]
   readOnly: boolean
@@ -137,11 +156,11 @@ function AwardSlot({
 }) {
   const [pick, setPick] = useState('')
   return (
-    <div className="row award-slot">
-      {label ? <b style={{ width: 48 }}>{label}</b> : null}
+    <div className="row award-slot" role="group" aria-label={title}>
+      {label ? <b className="award-slot-label">{label}</b> : null}
       {winners.map((w) => (
         <span key={w.id} className="badge accent">
-          {picker.winner(w)}
+          {winner(w)}
           {readOnly ? null : (
             <button className="btn ghost small icon" aria-label={t.awards.remove} onClick={() => onRemove(w.id)}>
               ✕
@@ -152,13 +171,7 @@ function AwardSlot({
       {readOnly && winners.length === 0 ? <span className="muted">{t.awards.noneThen}</span> : null}
       {!readOnly && winners.length < limit ? (
         <>
-          <Select
-            compact
-            ariaLabel={t.awards.pickPlayer}
-            value={pick}
-            options={picker.options}
-            onChange={setPick}
-          />
+          <Select compact ariaLabel={t.app.cellLabel(title, t.awards.pickPlayer)} value={pick} options={options} onChange={setPick} />
           <button
             className="btn small"
             disabled={pick === ''}
@@ -175,46 +188,73 @@ function AwardSlot({
   )
 }
 
+/**
+ * A weekly or monthly award: a period picker (1주차, 2주차…, or 10월 to 5월),
+ * starting at the latest period given, else the first; then each period given
+ * so far and the one picked. Given per conference or division, a period has a
+ * place for each, `winners` deep, and each place's picker lists only the
+ * players of its schools. Codes (w3, m2) are what's kept, never what's shown.
+ */
 function PeriodicAward({
+  award,
   picker,
-  name,
-  limit,
+  choices,
+  groups,
+  groupOfTeam,
   rows,
   readOnly,
   onGive,
   onRemove,
 }: {
+  award: PeriodicAwardConfig
   picker: Picker
-  name: string
-  limit: number
+  /** The periods to pick from, first to last. */
+  choices: string[]
+  groups: AwardGroup[]
+  groupOfTeam: (teamId: string) => string | null
   rows: AwardRow[]
   readOnly: boolean
   onGive: (period: string, playerId: string) => void
   onRemove: (id: number) => void
 }) {
-  const [period, setPeriod] = useState('w1')
+  const given = [...new Set(rows.map((r) => r.period))].sort(byPeriod)
+  const [period, setPeriod] = useState(() => given.at(-1) ?? choices[0] ?? '')
   // Looking back, only the periods that were given.
-  const periods = [...new Set([...rows.map((r) => r.period), ...(readOnly ? [] : [period])])].filter((p) => /^[wm]\d{1,3}$/.test(p)).sort()
+  const periods = [...new Set([...given, ...(readOnly ? [] : [period])])].filter((p) => p !== '').sort(byPeriod)
+  // A period given before that's past the picker's range stays pickable.
+  const pickable = [...new Set([...choices, ...given])].sort(byPeriod).map((p) => ({ value: p, label: periodLabel(p) }))
+  // A winner whose school fits no group now (none should) still shows, with the schools in none.
+  const known = new Set(groups.map((g) => g.id))
+  const placeOf = (r: AwardRow) => (known.has(r.group) ? r.group : null)
+  const places = rows.some((r) => placeOf(r) === null) && !known.has(null) ? [...groups, { id: null, name: '' }] : groups
+  const perGroup = places.length > 1
+  // Each group's players, once a look (not once a place).
+  const options = new Map(places.map((g) => [g.id, picker.options(perGroup ? (teamId) => groupOfTeam(teamId) === g.id : undefined)]))
   return (
     <div className="card">
       <div className="card-head">
-        <h3>{name}</h3>
-        {readOnly ? null : (
-          <TextInput value={period} onChange={(v) => setPeriod(v.trim().toLowerCase())} ariaLabel={t.awards.period} placeholder={t.awards.periodHelp} width={120} />
-        )}
+        <h3>{award.name}</h3>
+        {readOnly ? null : <Select compact ariaLabel={t.app.cellLabel(award.name, t.awards.period)} value={period} options={pickable} onChange={setPeriod} />}
       </div>
       {readOnly && periods.length === 0 ? <p className="muted">{t.awards.noneThen}</p> : null}
       {periods.map((p) => (
-        <AwardSlot
-          key={p}
-          picker={picker}
-          label={p}
-          limit={limit}
-          winners={rows.filter((r) => r.period === p)}
-          readOnly={readOnly}
-          onGive={(playerId) => onGive(p, playerId)}
-          onRemove={onRemove}
-        />
+        <div key={p} className={`award-period${!readOnly && p === period ? ' picked' : ''}`}>
+          {perGroup ? <div className="award-period-head">{periodLabel(p)}</div> : null}
+          {places.map((g) => (
+            <AwardSlot
+              key={g.id ?? ''}
+              title={awardLabel({ award: award.name, period: p, group: g.name || (perGroup ? t.awards.otherSchools : '') })}
+              label={perGroup ? g.name || t.awards.otherSchools : periodLabel(p)}
+              options={options.get(g.id)!}
+              winner={picker.winner}
+              limit={award.winners}
+              winners={rows.filter((r) => r.period === p && placeOf(r) === g.id)}
+              readOnly={readOnly}
+              onGive={(playerId) => onGive(p, playerId)}
+              onRemove={onRemove}
+            />
+          ))}
+        </div>
       ))}
     </div>
   )

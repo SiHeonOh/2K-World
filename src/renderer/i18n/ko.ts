@@ -398,6 +398,10 @@ export const ko = {
       period: '주기',
       periods: { week: '매주', month: '매달' },
       winners: '수상자 수',
+      scope: '대상',
+      scopes: { league: '리그 전체', conference: '컨퍼런스별', division: '디비전별' },
+      scopeHelp:
+        '컨퍼런스별·디비전별이면 NBA의 이주의 선수처럼 컨퍼런스(디비전)마다 따로 뽑고, 수상자 수도 그 하나하나의 인원이에요. 컨퍼런스가 하나뿐이면 리그 전체와 같아요.',
       addSeason: '시즌 시상 추가',
       addPeriodic: '주간·월간 시상 추가',
       newAward: '새 상',
@@ -792,8 +796,10 @@ export const ko = {
     confirmRemove: (award: string, winner: string) =>
       `${winner}의 ${award} 수상을 취소할까요? 위키에 이미 쓰였다면 취소됐다는 내용이 덧붙어요. 다시 주려면 새로 추가해야 해요.`,
     pickPlayer: '선수 선택',
+    /** The period picker of a weekly or monthly award (1주차…, or 10월 to 5월). */
     period: '주기',
-    periodHelp: '예: w1 (1주차), m2 (2월차)',
+    /** A place for the schools in no conference, beside each conference's. */
+    otherSchools: '그 밖의 학교',
     /** Only a past season's awards are read only, so an empty slot there is over, not waiting. */
     noneThen: '수상자가 없었어요.',
   },
@@ -1082,9 +1088,9 @@ export const ko = {
     'bad-label': () => '시즌 이름을 입력하세요',
     'season-label-taken': (p: P) => `'${p.label}'은(는) 이미 있는 시즌 이름이에요. 다른 이름을 써 주세요`,
     'unknown-award': () => '상을 찾을 수 없어요',
-    'bad-period': () => '주기 형식이 올바르지 않아요 (예: w1, m2)',
+    'bad-period': () => '이 상에 맞는 주기가 아니에요 (주간 상은 주차, 월간 상은 달로 줘요)',
     'bad-rank': () => '팀 순번이 올바르지 않아요',
-    'award-full': (p: P) => `이 자리는 이미 ${p.limit}명이 찼어요`,
+    'award-full': (p: P) => (p.group ? `${p.group} 자리는 이미 ${p.limit}명이 찼어요` : `이 자리는 이미 ${p.limit}명이 찼어요`),
     'award-duplicate': () => '이 선수는 이미 이 상을 받았어요 (같은 상의 다른 팀에 둘 수 없어요)',
     'award-too-early': () => '결승이 끝난 뒤에 줄 수 있는 상이에요',
     'veto-window-closed': () => '카드 트레이드는 그 트레이드를 한 시기 안에서만 거부할 수 있어요',
