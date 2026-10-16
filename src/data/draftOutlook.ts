@@ -1,6 +1,7 @@
 import type { CardTier, Phase } from '@shared/config/schema'
 import type { CardRow, DraftActionRow } from '@shared/season'
 import type { RatingValue } from '@shared/setup'
+import { projectedCards } from '@core/market'
 import { peckingOrder, playerValue } from '@core/value'
 import type { Db } from './db'
 import { currentSeason, listPlayers, listTeams, loadConfig } from './league'
@@ -31,7 +32,8 @@ export function tierCards(allocation: readonly CardTier[], rank: number): number
  * get no cards at all: the reader leaves them out of this.
  */
 export function projectedDraftCards(allocation: readonly CardTier[], rankIndex: number, issuedPerTeam: number, held: number): number {
-  return held + Math.max(0, tierCards(allocation, rankIndex + 1) - issuedPerTeam)
+  // The AI GMs' own count, so the fans and the front offices always agree on a school's cards.
+  return projectedCards(allocation, rankIndex + 1, held, issuedPerTeam)
 }
 
 export interface SchoolCards {
