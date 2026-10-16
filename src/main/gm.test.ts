@@ -3,15 +3,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sampleSetup } from '@shared/testing/fixtures'
+import { defaultCardSwap } from '@shared/config/defaults'
+import type { EventPayloads } from '@shared/events'
+import { scoreDeal } from '@core/market'
 import { openDb, type Db } from '@data/db'
-import { createNegotiation, insertWindow, updateNegotiation, windowAfterRound } from '@data/gm'
+import { createNegotiation, getNegotiation, insertWindow, updateNegotiation, windowAfterRound } from '@data/gm'
 import { currentSeason, listEvents, listPlayers, loadConfig, seedLeague, updateConfig } from '@data/league'
 import { listChecklist, listTrades } from '@data/moves'
 import { listGames, recordScore, setPhase, startSeason } from '@data/season'
 import { describeEvent, readLeague } from '@story/context'
 import { storyDemo, storyKinds } from '@story/jobs'
 import { wikiEditDemo, wikiEditKind } from '@story/wikiEdits'
-import { gmDemo, gmKinds, resolvePlayer, type GmHooks } from '@sim/gm'
+import { gmDemo, gmKinds, intentInput, readMarket, resolvePlayer, respondInput, settleDeal, tradeIsBlockbuster, type GmHooks } from '@sim/gm'
 import { AiService } from './ai'
 import { GmService } from './gm'
 import { syncLoreFolder } from './lore'
@@ -220,5 +223,70 @@ describe('what the review found', () => {
     expect(resolvePlayer(league, `${p.name}(가람고 SG · OVR 71)`)).toBe(p.id)
     expect(resolvePlayer(league, p.name)).toBe(p.id)
     expect(resolvePlayer(league, '없는선수')).toBeNull()
+  })
+})
+
+describe('superstar trades', () => {
+  /** 가람고's PG (p1) becomes the league's star; everyone else is 70–75. */
+  const star = () => db.prepare("UPDATE ratings SET num = 99 WHERE player_id = 'p1' AND column_id = 'ovr'").run()
+  const window = () => {
+    const season = currentSeason(db)
+    return insertWindow(db, season.id, season.phase, null, 'manual', Date.now())
+  }
+  const payloads = () => listEvents(db, 'trade_applied').map((e) => e.payload as EventPayloads['trade_applied'])
+
+  it('a deal that moves a star is tagged a blockbuster when it’s made; an ordinary one isn’t', () => {
+    star()
+    // A trade you make yourself is read the same way.
+    expect(tradeIsBlockbuster(db, dir, [{ kind: 'player', playerId: 'p1', from: 't1', to: 't3' }, { kind: 'player', playerId: 'p15', from: 't3', to: 't1' }])).toBe(true)
+    expect(tradeIsBlockbuster(db, dir, [{ kind: 'player', playerId: 'p16', from: 't3', to: 't5' }, { kind: 'player', playerId: 'p28', from: 't5', to: 't3' }])).toBe(false)
+    const w = window()
+    const big = createNegotiation(db, w, { a: 't2', b: 't1', aGives: ['p8'], bGives: ['p1'], aCards: [], bCards: [] }, Date.now())
+    const small = createNegotiation(db, w, { a: 't3', b: 't4', aGives: ['p14'], bGives: ['p20'], aCards: [], bCards: [] }, Date.now())
+    expect(settleDeal(db, dir, getNegotiation(db, big)!, Date.now())).toBe('accepted')
+    expect(settleDeal(db, dir, getNegotiation(db, small)!, Date.now())).toBe('accepted')
+    const [first, second] = payloads()
+    expect(first).toMatchObject({ negotiationId: big, blockbuster: true })
+    expect(second).not.toHaveProperty('blockbuster')
+    // The season has had its blockbuster: the same star moving on isn't covered big twice.
+    expect(tradeIsBlockbuster(db, dir, [{ kind: 'player', playerId: 'p1', from: 't2', to: 't3' }, { kind: 'player', playerId: 'p15', from: 't3', to: 't2' }])).toBe(false)
+  })
+
+  it('GMs read packages and consolidations plainly: what each side sends, card worth, strength, the pecking order and shot shares', () => {
+    star()
+    // A card-swap league in season: every school holds its cards.
+    db.prepare("UPDATE league_config SET json = json_set(json, '$.draft', json(?))").run(JSON.stringify(defaultCardSwap(8)))
+    startSeason(db)
+    const league = readLeague(db, dir)
+    const data = readMarket(league)
+    const cards = data.market.cards.filter((c) => c.ownerTeamId === 't2').map((c) => c.id)
+    // 나람고 sends two of its middle players (PF 73, C 74) and two cards for 가람고's star and its weakest (SG 71).
+    const id = createNegotiation(db, window(), { a: 't2', b: 't1', aGives: ['p10', 'p11'], bGives: ['p1', 'p2'], aCards: cards.slice(0, 2), bCards: [] }, Date.now())
+    const input = respondInput(league, data, getNegotiation(db, id)!, 1, false, '받아 주시죠')
+    expect(input.context).toContain('[통합: 우리 에이스 + 벤치 ↔ 상대 주전 둘 · 패키지: 선수 + 카드(상대가 2장)]')
+    expect(input.context).toMatch(/나람고 \d번 카드\(가치 약 \d+\)/)
+    expect(input.context).toContain('카드 가치 들어옴')
+    expect(input.context).toMatch(/거래 뒤 우리 서열과 기대 슛 비중\(코드가 계산, 괄호는 지금\): 1\. \S+ \d+%\(지금 \d+%\)/)
+    expect(input.context).toMatch(/\d+%\(새로 옴\)/)
+    const kinds = gmKinds(db, dir, { queue: () => {}, changed: () => {} })
+    const shapes = '패키지("주전 + 카드")와 통합("에이스 + 벤치 ↔ 주전 둘")도 평범한 방식이다'
+    expect(kinds[1]!.prompt(input as never)).toContain(shapes)
+    // The proposer's options carry the same: its order after each deal, and the same line in its instructions.
+    const intent = intentInput(league, data, input.windowId, null, [{ teamId: 't2', options: [scoreDeal(data.market, getNegotiation(db, id)!.deal)] }])
+    expect(intent.context).toContain('O1 · 가람고와 [통합: 상대 에이스 + 벤치 ↔ 우리 주전 둘 · 패키지: 선수 + 카드(우리가 2장)]')
+    expect(intent.context).toContain('거래 뒤 우리 서열과 슛 비중: 1. ')
+    expect(kinds[0]!.prompt(intent as never)).toContain(shapes)
+  })
+
+  it('demo GMs still trade with packages on the table, and every deal goes through the League engine', async () => {
+    db.prepare("UPDATE league_config SET json = json_set(json, '$.draft', json(?))").run(JSON.stringify(defaultCardSwap(8)))
+    startSeason(db)
+    star()
+    gm.openWindow('test', db, dir, 'manual', null)
+    await drain()
+    const [w] = gm.windows(db)
+    expect(w!.negotiations.filter((n) => n.status === 'accepted').length).toBeGreaterThan(0)
+    expect(w!.negotiations.filter((n) => n.status === 'failed')).toEqual([])
+    expect(listTrades(db, currentSeason(db).id).filter((t) => t.source === 'gm').length).toBe(w!.negotiations.filter((n) => n.status === 'accepted').length)
   })
 })

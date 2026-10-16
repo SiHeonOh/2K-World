@@ -68,7 +68,7 @@ const post = z.object({
     })
     .nullable()
     .optional()
-    .describe('투표 글(이번에 쓸 글에서 투표라고 한 글)에만 붙이는 투표 칸. 팬들이 실제로 투표한다. 투표 글이 아니면 null'),
+    .describe('투표 글(이번에 쓸 글에서 투표라고 한 글, 또는 지시가 투표를 붙이라고 한 글)에만 붙이는 투표 칸. 팬들이 실제로 투표한다. 투표 글이 아니면 null'),
 })
 
 export const storyOutputSchema = z.object({

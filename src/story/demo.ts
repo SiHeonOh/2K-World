@@ -21,9 +21,9 @@ export interface DemoFacts {
   postIds: number[]
   /** What you wrote, for replies. */
   userText?: string
-  /** A chatter batch's poll topic (question and options), when its plan has one. */
+  /** A chatter batch's poll topic (question and options), when its plan has one; a blockbuster thread's poll. */
   poll?: { question: string; options: string[] }
-  /** A chatter batch's analysis topic, when its plan has one: who writes it, its 말머리 and subject, and its stats pack. */
+  /** A chatter batch's analysis topic, when its plan has one: who writes it, its 말머리 and subject, and its stats pack. A blockbuster's article too. */
   analysis?: { author: string; tag: string | null; title: string; lines: string[] }
 }
 
@@ -98,17 +98,31 @@ export function demoOutput(kind: StoryKind, input: StoryInput): StoryOutput {
         replies: [],
         memories: facts.teams.length ? [{ author: fan(), note: `${facts.teams[0]} 이번 시즌 4강 간다고 함` }] : [],
       }
-    case 'event_thread':
+    case 'event_thread': {
+      // A blockbuster trade: the reporter's long article from its pack, and a busier thread with the poll.
+      const article = facts.analysis
+        ? { board: input.board, author: facts.analysis.author, tag: facts.analysis.tag, title: facts.analysis.title, body: analysisBody(facts.analysis), heat: 4, comments: comments(6) }
+        : facts.reporters.length
+          ? { board: input.board, author: facts.reporters[0]!, tag: '오피셜', title: facts.headline, body: `${facts.headline}\n\n자세한 내용은 추후 전한다.`, heat: 3, comments: comments(5) }
+          : null
       return {
         posts: [
-          ...(facts.reporters.length
-            ? [{ board: input.board, author: facts.reporters[0]!, tag: '오피셜', title: facts.headline, body: `${facts.headline}\n\n자세한 내용은 추후 전한다.`, heat: 3, comments: comments(5) }]
-            : []),
-          { board: input.board, author: fan(), tag: null, title: `${facts.headline} 이거 어떻게 봄?`, body: '반응 궁금하다', heat: 3, comments: comments(12) },
+          ...(article ? [article] : []),
+          {
+            board: input.board,
+            author: fan(),
+            tag: null,
+            title: `${facts.headline} 이거 어떻게 봄?`,
+            body: '반응 궁금하다',
+            heat: facts.poll ? 4 : 3,
+            comments: comments(facts.poll ? 22 : 12),
+            ...(facts.poll ? { poll: facts.poll } : {}),
+          },
         ],
         replies: [],
         memories: [],
       }
+    }
     case 'reply_to_user':
       return {
         posts: [],

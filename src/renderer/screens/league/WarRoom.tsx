@@ -281,10 +281,11 @@ function Negotiation({
 }
 
 function Deal({ deal, names }: { deal: DealView; names: Names }) {
+  // Players, then any cards on top: "김하람, 박나래 + 가람고 1번 카드, 누리고 2번 카드".
   const side = (team: string, players: string[], cards: number[]) => (
     <div className="gm-deal-side">
       <span className="muted">{tg.sends(names.team(team))}</span>
-      <span>{[...players.map(names.player), ...cards.map(names.card)].join(', ') || '—'}</span>
+      <span>{[players.map(names.player).join(', '), cards.map(names.card).join(', ')].filter(Boolean).join(' + ') || '—'}</span>
     </div>
   )
   return (
@@ -312,7 +313,7 @@ function Step({ s, left, names, notes }: { s: StepView; left: boolean; names: Na
           <b>{tg.note}</b> {s.note}
         </p>
       ) : null}
-      {notes && s.report ? <p className="gm-report muted">{tg.report(s.report.strengthBefore, s.report.strengthAfter, s.report.gain)}</p> : null}
+      {notes && s.report ? <p className="gm-report muted">{tg.report(s.report.strengthBefore, s.report.strengthAfter, s.report.gain, s.report.cardsIn, s.report.cardsOut)}</p> : null}
     </div>
   )
 }

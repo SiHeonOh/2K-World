@@ -10,8 +10,9 @@ import { ownedSections, pageByTitle, pageFlags, revisionBody, saveRevision, sect
 import { tagUnverified, untag } from '@shared/numbers'
 import { playedMode, roundLabel } from '@shared/played'
 import { openDisputes } from '@data/talk'
-import { castBlock, join2, loreFor, pickCast, playerName, said, short, statLine, type League } from './context'
-import { AUTO_SECTIONS, seedWiki, upgradeWiki, wikiTitles } from './wiki'
+import type { EventPayloads, LeagueEvent } from '@shared/events'
+import { castBlock, describeEvent, join2, loreFor, pickCast, playerName, said, short, starOf, statLine, tradeSides, type League } from './context'
+import { AUTO_SECTIONS, particle, seedWiki, upgradeWiki, wikiTitles } from './wiki'
 import type { WikiOccasion } from './wikiOccasions'
 import { numberGate, NumbersRedo, readFacts, withRetryNote } from './numbers'
 import { averages, streakText } from './statsPack'
@@ -100,7 +101,8 @@ export interface WikiEditInput {
   /** Awards, draft swaps or series results this job writes up, kept so later news can join it while it waits (see wikiOccasions.ts). */
   occasion?: WikiOccasion
   asOfEvent: number
-  demo: { pages: string[]; editors: string[]; facts: string[] }
+  /** history: a page whose 역사 the demo editors write (a blockbuster's star). */
+  demo: { pages: string[]; editors: string[]; facts: string[]; history?: string }
   /** The one retry after edits used numbers the facts don't hold (these): its edits land with them marked. */
   numberRetry?: string[]
   /** On that retry: the job it redoes (for 최근 작업). */
@@ -403,6 +405,35 @@ export function wikiEditInput(
   }
 }
 
+/** What a blockbuster's editors are told (no numbers: it's facts). */
+export const blockbusterWikiNote = (star: string) =>
+  `이번 일은 블록버스터 트레이드다: 리그의 스타 ${star}${particle(star, '이', '가')} 학교를 옮겼다. 평소 트레이드보다 크게 쓴다. ${star} 문서의 역사 문단에 이 트레이드를 한 문단으로 덧붙인다(append, 서너 문장): 언제 어느 학교에서 어느 학교로 옮겼는지, 무엇과 맞바꿨는지, 그 시즌 그가 어땠는지, 두 학교에 무엇을 뜻하는지. 이번 시즌 문단에도 한두 문장으로 녹인다. 두 학교 문서는 이번 시즌 문단에 누구를 내주고 무엇을 받았는지와 왜 큰 거래인지 정리한다. 함께 옮긴 선수 문서는 이번 시즌 문단에 이적을 쓴다.`
+
+/**
+ * The editors' job after a trade: the moved players' and both schools'
+ * pages, with the trade as facts. A blockbuster (it moved a star) gets a
+ * fuller write-up: what each school sent, the star's page first, and a
+ * paragraph of its own in his 역사 beside the season paragraphs.
+ */
+export function tradeWikiInput(league: League, e: LeagueEvent): WikiEditInput | null {
+  const p = e.payload as EventPayloads['trade_applied']
+  const fact = describeEvent(league, e)?.text
+  if (!fact) return null
+  if (!p.blockbuster) return wikiEditInput(league, { players: p.players, teams: p.teams }, [fact], `trade:${e.id}`)
+  const star = starOf(league, p.players)
+  const sides = tradeSides(league, p.tradeId).map((s) => `${short(league, s.from)} → ${short(league, s.to)}: ${[...s.players, ...s.cards].join(', ')}`)
+  const input = wikiEditInput(
+    league,
+    { players: [star, ...p.players.filter((id) => id !== star)], teams: p.teams },
+    [fact, ...sides],
+    `trade:${e.id}`,
+    p.teams,
+    blockbusterWikiNote(playerName(league, star)),
+  )
+  // The demo editors write the star's 역사 too (his page comes first).
+  return input && { ...input, demo: { ...input.demo, history: input.pages[0] } }
+}
+
 /** A completed round's games and its five best lines by points: whose pages the round's editors touch. */
 export function roundTop(league: League, seasonId: number, round: number) {
   const games = listGames(league.db, seasonId).filter((g) => g.stage === 'regular' && g.round === round && g.status === 'final')
@@ -599,21 +630,26 @@ export function wikiEditKind(db: Db, style: () => string | null = () => null, ho
   }
 }
 
-/** Demo edits: one stats-style line under 여담 per page, and the first page's season paragraph. */
+/** Demo edits: one stats-style line under 여담 per page (a blockbuster's star: a paragraph in 역사), and the first page's season paragraph. */
 export function wikiEditDemo(kind: string, input: unknown): WikiEditOutput | null {
   if (kind !== WIKI_EDITS) return null
   const i = input as WikiEditInput
   const editor = (n: number) => i.demo.editors[n % Math.max(1, i.demo.editors.length)] ?? 'system'
   return {
     edits: i.demo.pages.flatMap((page, n) => [
-      {
-        page,
-        section: '여담',
-        mode: 'append' as const,
-        text: ` * ${i.demo.facts[n + 1] ?? i.demo.facts[0] ?? '기록 갱신'}`,
-        summary: '최근 경기 반영',
-        editor: editor(n),
-      },
+      // A blockbuster's star: his 역사 first (a page takes two edits at most), then his season paragraph.
+      ...(page === i.demo.history
+        ? [{ page, section: '역사', mode: 'append' as const, text: `${i.demo.facts[0] ?? '트레이드'}.`, summary: '트레이드 정리', editor: editor(n) }]
+        : [
+            {
+              page,
+              section: '여담',
+              mode: 'append' as const,
+              text: ` * ${i.demo.facts[n + 1] ?? i.demo.facts[0] ?? '기록 갱신'}`,
+              summary: '최근 경기 반영',
+              editor: editor(n),
+            },
+          ]),
       ...(n === 0 && i.season
         ? [{ page, section: i.season, mode: 'replace' as const, text: `${i.demo.facts[1] ?? i.demo.facts[0] ?? '시즌이 시작됐다'}.`, summary: '시즌 문단 정리', editor: editor(n) }]
         : []),

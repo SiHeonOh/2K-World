@@ -1,10 +1,12 @@
 import { join } from 'node:path'
 import { hash32, rng, shuffle } from '@core/random'
+import { playerValue } from '@core/value'
 import { type LeagueConfig, aiFor } from '@shared/config/schema'
 import type { EventPayloads, LeagueEvent } from '@shared/events'
 import { lastEventId, listPersonas, memoriesOf, personaCount, savePersonas, type PersonaRow } from '@data/community'
 import { jsonField, type Db } from '@data/db'
 import { flagsFor, flagsOf } from '@data/flags'
+import { positionOf } from '@shared/labels'
 import { tagUnverified } from '@shared/numbers'
 import { playedMode, roundLabel } from '@shared/played'
 import { rotationMove } from '@shared/roster'
@@ -21,7 +23,7 @@ import { ARCHETYPES, makeCast } from './personas'
 import type { StoryInput, StoryKind } from './jobs'
 import { leagueFeelings } from './feelings'
 import { CAST_HEADING } from './numbers'
-import { gameBlocks, readSeason, roundBlocks, seasonNote } from './statsPack'
+import { gameBlocks, headToHead, playerSeason, readSeason, roundBlocks, seasonNote, teamProfile } from './statsPack'
 
 /**
  * Builds what each story job reads: league facts, the game or event, lore
@@ -341,7 +343,7 @@ export function describeEvent(league: League, e: LeagueEvent): { text: string; t
       const cards = ((p.cards as number[]) ?? []).length
       const gm = p.negotiationId ? ` (단장 간 협상으로 성사${p.lopsided ? ', 한쪽으로 크게 기운 거래라 사기 트레이드 논란' : ''})` : ''
       return {
-        text: `트레이드 성사: ${((p.teams as string[]) ?? []).map((t) => short(league, t)).join(' ↔ ')}${moves.length ? ` — ${moves.join(', ')}` : ''}${cards ? `, 카드 ${cards}장` : ''}${gm}`,
+        text: `트레이드 성사${p.blockbuster ? '(블록버스터: 리그의 스타가 팀을 옮김)' : ''}: ${((p.teams as string[]) ?? []).map((t) => short(league, t)).join(' ↔ ')}${moves.length ? ` — ${moves.join(', ')}` : ''}${cards ? `, 카드 ${cards}장` : ''}${gm}`,
         teams: (p.teams as string[]) ?? [],
         players,
         role: 'trades',
@@ -538,27 +540,138 @@ export function eventThreadInput(league: League, events: LeagueEvent[]): StoryIn
   if (described.length === 0) return null
   const teams = [...new Set(described.flatMap((d) => d.teams))]
   const players = [...new Set(described.flatMap((d) => d.players))]
-  const cast = pickCast(league, { teams, fans: 16, reporters: 2, salt: `event:${events.map((e) => e.id).join(',')}` })
+  // A trade that moved a star gets the big treatment: a long article on the stats pack, a busier thread and a poll.
+  const big = events.length === 1 && isBlockbusterEvent(events[0]!) ? blockbusterFacts(league, events[0]!) : null
+  const cast = pickCast(league, { teams, fans: big ? 24 : 16, reporters: 2, salt: `event:${events.map((e) => e.id).join(',')}` })
   const news = `# 이번 소식\n${described.map((d) => `- ${d.text}`).join('\n')}`
   // A player's words with numbers marked (not in his facts): the forum's posts repeating them are marked too.
   const marked = [
     ...new Set(events.filter((e) => e.type === 'player_said').flatMap((e) => flagsOf(league.db, 'player_quote', (e.payload as EventPayloads['player_said']).quoteId))),
   ]
+  const reporter = cast.find((p) => p.kind === 'reporter')
   return {
     ...aiFor(league.config, 'article'),
     ...(marked.length ? { marked } : {}),
-    instructions: events.every((e) => e.type === 'standings_moment') ? STANDINGS_NOTE : '',
-    context: join2(boardsBlock(league), leagueBlock(league), news, loreFor(league, teams, players), myTakesBlock(league, teams, players), castBlock(league, cast), coveredBlock(league)),
+    instructions: big ? BLOCKBUSTER_NOTE : events.every((e) => e.type === 'standings_moment') ? STANDINGS_NOTE : '',
+    ...(big ? { guide: blockbusterGuide(big.teams.map((t) => short(league, t))) } : {}),
+    context: join2(
+      boardsBlock(league),
+      leagueBlock(league),
+      news,
+      ...(big?.blocks ?? []),
+      loreFor(league, teams, players),
+      myTakesBlock(league, teams, players),
+      castBlock(league, cast),
+      coveredBlock(league),
+    ),
     board: boardOf(league, described[0]!.role),
     eventId: events.at(-1)!.id,
     asOfEvent: lastEventId(league.db),
-    spreadMs: 12 * 60_000,
+    spreadMs: (big ? 20 : 12) * 60_000,
     demo: demoFacts(league, cast, {
       headline: described.length === 1 ? described[0]!.text : `${described[0]!.text} 외 ${described.length - 1}건`,
       teams: teams.map((t) => short(league, t)),
       names: players.map((p) => playerName(league, p)),
+      // The demo writer's long article is the pack as it is, and the thread carries the poll.
+      ...(big ? { poll: { question: TRADE_POLL, options: [...big.teams.map((t) => short(league, t)), TRADE_POLL_BOTH] } } : {}),
+      ...(big && reporter ? { analysis: { author: reporter.id, tag: '단독', title: `${playerName(league, big.star)} 트레이드, 무엇이 오갔나`, lines: big.pack } } : {}),
     }),
   }
+}
+
+/** A trade that moved a star (isBlockbuster in src/core/market.ts, tagged when it was made). */
+export const isBlockbusterEvent = (e: LeagueEvent): boolean => e.type === 'trade_applied' && (e.payload as EventPayloads['trade_applied']).blockbuster === true
+
+/** The poll on a blockbuster's fans' thread, and its third option. */
+export const TRADE_POLL = '누가 이긴 트레이드?'
+export const TRADE_POLL_BOTH = '둘 다 윈윈'
+
+/** What a blockbuster's thread is told (no numbers: it's facts). The lengths are in its guide. */
+export const BLOCKBUSTER_NOTE = '이번 소식은 블록버스터 트레이드다. 자료의 "블록버스터 트레이드"와 시즌 기록으로 쓴다.'
+
+/**
+ * How a blockbuster is written: part of the prompt, not facts (it has
+ * lengths in it). The reporter's long article on what each side got and why,
+ * a busier fans' thread, and a poll on who won it.
+ */
+export function blockbusterGuide(schools: string[]): string {
+  return [
+    '블록버스터 트레이드다: 리그의 스타가 팀을 옮겼다. 이번에는 위 기본 지시의 길이와 댓글 수보다 아래를 따른다.',
+    '기자 기사 1개(말머리 단독이나 분석)는 장문으로 쓴다: 본문 1,000~2,500자, 1~3문장짜리 짧은 문단, 번호 소제목("1. ○○"), 절마다 결론 한 문장은 **굵게**. 마크다운 제목(#)과 표는 쓰지 않는다. 순서: 무엇이 오갔나(두 학교가 주고받은 선수와 카드) / 왜 했나(두 학교의 시즌과 처지, 알려진 운영 기조) / 스타의 시즌과 새 학교에서 그의 자리 / 내준 쪽이 얻은 것 / 남은 질문. 맺음은 독자에게 묻는 말로.',
+    '숫자는 자료의 "두 학교 시즌 기록"과 "옮긴 선수들의 시즌 기록"에 적힌 그대로 쓰고, 자료에 없는 계산은 하지 않는다.',
+    '팬 반응 스레드 1개는 평소보다 붐비게, 댓글 20~30개: 두 학교 팬과 중립, 누가 이겼냐는 키배, 사기 트레이드 논쟁, 떠난 스타에 대한 아쉬움과 새 스타 환영, 했제와 박제.',
+    `그 팬 스레드에 투표를 붙인다: 질문 "${TRADE_POLL}", 보기는 ${schools.map((s) => `"${s}"`).join(', ')}, "${TRADE_POLL_BOTH}".`,
+  ].join('\n')
+}
+
+const PHILOSOPHY_KO: Record<string, string> = { 'win-now': '당장 우승', balanced: '균형', development: '육성' }
+
+/**
+ * A blockbuster's facts beside the news: what each school sent (players with
+ * their positions, cards by name), its star (the most valuable player it
+ * moved), the two GMs' known leanings, and the stats pack: both schools'
+ * seasons and every moved player's, the star's first. `pack` is the same as
+ * lines, for the demo writer.
+ */
+export function blockbusterFacts(league: League, e: LeagueEvent): { blocks: string[]; pack: string[]; star: string; teams: string[] } | null {
+  const p = e.payload as EventPayloads['trade_applied']
+  if (p.players.length === 0 || p.teams.length !== 2) return null
+  const star = starOf(league, p.players)
+  const sides = tradeSides(league, p.tradeId)
+  const lean = p.teams.flatMap((t) => {
+    const g = league.lore.gm.get(t)
+    return g?.kind === 'gm' && g.settings.philosophy ? [`${short(league, t)} ${PHILOSOPHY_KO[g.settings.philosophy] ?? g.settings.philosophy}`] : []
+  })
+  const trade = [
+    `# 블록버스터 트레이드 (리그의 스타가 팀을 옮겼다)`,
+    ...sides.map((s) => `- ${short(league, s.from)} → ${short(league, s.to)}: ${[...s.players, ...s.cards].join(', ')}`),
+    `- 이 트레이드의 스타: ${playerName(league, star)} (${short(league, p.teams.find((t) => t !== league.players.get(star)?.teamId) ?? '')}에서 ${short(league, league.players.get(star)?.teamId ?? '')}(으)로)`,
+    lean.length ? `- 단장의 운영 기조(리그에 알려진 평판): ${lean.join(', ')}` : '',
+  ].filter(Boolean)
+  const season = readSeason(league)
+  const schools = [`# 두 학교 시즌 기록 (정규시즌; 숫자는 여기 적힌 그대로)`, ...p.teams.flatMap((t) => teamProfile(season, t)), headToHead(season, p.teams[0]!, p.teams[1]!)]
+  const moved = [star, ...p.players.filter((id) => id !== star)]
+  const players = [`# 옮긴 선수들의 시즌 기록 (스타 먼저)`, ...moved.flatMap((id) => playerSeason(season, id))]
+  return { blocks: [trade.join('\n'), schools.join('\n'), players.join('\n')], pack: [...trade.slice(1), ...schools.slice(1), ...players.slice(1)], star, teams: p.teams }
+}
+
+/** The most valuable of these players (by his ratings): a trade's star. */
+export function starOf(league: League, playerIds: readonly string[]): string {
+  const value = new Map(listPlayers(league.db).map((p) => [p.id, playerValue(league.config, p.ratings)]))
+  return [...playerIds].sort((a, b) => (value.get(b) ?? 0) - (value.get(a) ?? 0) || a.localeCompare(b))[0]!
+}
+
+/** What each school sent in a trade: its players (with their positions then) and its cards by name, as the screens name them. */
+export function tradeSides(league: League, tradeId: number): { from: string; to: string; players: string[]; cards: string[] }[] {
+  const rows = league.db
+    .prepare(
+      `SELECT i.kind, i.from_team_id, i.to_team_id, i.player_id, i.from_slot_id, c.original_team_id, c.number, c.issued_season_id
+       FROM trade_items i LEFT JOIN cards c ON c.id = i.card_id WHERE i.trade_id = ? ORDER BY i.rowid`,
+    )
+    .all(tradeId) as {
+    kind: 'player' | 'card'
+    from_team_id: string
+    to_team_id: string
+    player_id: string | null
+    from_slot_id: string | null
+    original_team_id: string | null
+    number: number | null
+    issued_season_id: number | null
+  }[]
+  const season = currentSeason(league.db)
+  const label = (id: number) => (league.db.prepare('SELECT label FROM seasons WHERE id = ?').get(id) as { label: string } | undefined)?.label ?? ''
+  const out: { from: string; to: string; players: string[]; cards: string[] }[] = []
+  for (const r of rows) {
+    let side = out.find((s) => s.from === r.from_team_id)
+    if (!side) out.push((side = { from: r.from_team_id, to: r.to_team_id, players: [], cards: [] }))
+    if (r.kind === 'player' && r.player_id) {
+      const position = positionOf(league.config, r.from_slot_id)
+      side.players.push(`${playerName(league, r.player_id)}${position ? `(${position})` : ''}`)
+    } else if (r.kind === 'card' && r.original_team_id !== null && r.number !== null) {
+      side.cards.push(`${short(league, r.original_team_id)} ${r.number}번 카드${r.issued_season_id !== null && r.issued_season_id !== season.id ? ` (${label(r.issued_season_id)})` : ''}`)
+    }
+  }
+  return out
 }
 
 /** What a thread about standings moments alone is told: mostly the fans, an article only for settled places. */

@@ -27,8 +27,11 @@ export interface EventPayloads {
   series_result_changed: { seriesId: number; slot: string; before: string | null; after: string | null }
   draft_protection_closed: Record<string, never>
   season_created: { label: string }
-  /** A GM trade also carries its negotiation, the value the proposer gained, and whether that's lopsided. */
-  trade_applied: { tradeId: number; teams: string[]; players: string[]; cards: number[]; negotiationId?: number; valueGap?: number; lopsided?: boolean }
+  /**
+   * A GM trade also carries its negotiation, the value the proposer gained, and whether that's lopsided.
+   * blockbuster: it moved a star (isBlockbuster in src/core/market.ts), so the story engine covers it big.
+   */
+  trade_applied: { tradeId: number; teams: string[]; players: string[]; cards: number[]; negotiationId?: number; valueGap?: number; lopsided?: boolean; blockbuster?: boolean }
   trade_window_opened: { windowId: number; round: number | null }
   /** agreed: deals waiting for your approval (older events have none). */
   trade_window_closed: { windowId: number; trades: number; agreed?: number; talks: number }

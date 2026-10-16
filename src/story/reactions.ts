@@ -13,7 +13,7 @@ import { standings } from '@data/season'
 import { flagNumbers, flagsFor } from '@data/flags'
 import { tagUnverified, untag } from '@shared/numbers'
 import { lockerRoom, relationTarget } from './mood'
-import { readLeague, said, short, type League } from './context'
+import { readLeague, said, short, starOf, type League } from './context'
 import { checkNumbers, readFacts, retryNote } from './numbers'
 
 /**
@@ -33,6 +33,13 @@ export const REACTION_PRIORITY = 22
 const PER_JOB = 6
 /** A mood swing alone doesn't get a player talking again until his team has played this many games. */
 const QUIET_GAMES = 3
+/**
+ * A blockbuster's star outranks everything (폭발 직전 is 4); the key teammate
+ * on each side comes just below 폭발 직전, ahead of an ordinary trade's movers
+ * (2 + value / 50), so a batch of six holds them.
+ */
+const BLOCKBUSTER_STAR = 5
+const BLOCKBUSTER_MATE = 3.95
 
 /** The events a player may react to (season awards only, among awards). */
 export const REACTION_TRIGGERS = new Set<EventType>(['mood_changed', 'wanting_out', 'trade_applied', 'draft_swap', 'award_given'])
@@ -146,9 +153,24 @@ export function reactionPicks(league: League, events: LeagueEvent[], limit = PER
       // A slow build-up, not a single blow: like a mood swing, it waits out his quiet spell after speaking.
       add(x.playerId as string, '참다 참다: 학교를 떠나고 싶은 마음이 커짐', 3.5, true)
     } else if (e.type === 'trade_applied') {
-      for (const id of (x.players as string[]) ?? []) {
+      const t = x as EventPayloads['trade_applied']
+      const moved = t.players ?? []
+      // A blockbuster: its star speaks first, and the key teammate on each side (his school's best who stayed) has a say.
+      const star = t.blockbuster ? starOf(league, moved) : null
+      for (const id of moved) {
         const to = league.players.get(id)?.teamId ?? ''
-        add(id, `트레이드로 ${short(league, to)}(으)로 이적`, 2 + (value.get(id) ?? 0) / 50)
+        add(id, `트레이드로 ${short(league, to)}(으)로 이적${id === star ? ' (리그가 들썩인 블록버스터 트레이드의 주인공)' : ''}`, id === star ? BLOCKBUSTER_STAR : 2 + (value.get(id) ?? 0) / 50)
+      }
+      if (star) {
+        const starTeam = league.players.get(star)?.teamId ?? ''
+        const starName = league.players.get(star)?.name ?? ''
+        for (const team of t.teams ?? []) {
+          const mate = [...league.players.values()]
+            .filter((p) => p.teamId === team && !moved.includes(p.id))
+            .sort((a, b) => (value.get(b.id) ?? 0) - (value.get(a.id) ?? 0) || a.id.localeCompare(b.id))[0]
+          if (!mate) continue
+          add(mate.id, team === starTeam ? `스타 ${starName}이(가) 트레이드로 우리 학교에 합류함` : `${starName}이(가) 트레이드로 ${short(league, starTeam)}(으)로 떠남`, BLOCKBUSTER_MATE)
+        }
       }
     } else if (e.type === 'draft_swap') {
       add(x.playerId as string, `드래프트에서 ${short(league, x.targetTeamId as string)}(으)로 보내짐`, 1 + (value.get(x.playerId as string) ?? 0) / 50)

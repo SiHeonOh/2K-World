@@ -54,7 +54,8 @@ export const gmText = {
   actions: { offer: '제안', counter: '역제안', accept: '수락', reject: '거절' } as Record<string, string>,
   note: '속마음',
   showNotes: '속마음 보기',
-  report: (before: number, after: number, gain: number) => `전력 ${before} → ${after} · 받는 가치 ${gain > 0 ? '+' : ''}${gain}`,
+  report: (before: number, after: number, gain: number, cardsIn = 0, cardsOut = 0) =>
+    `전력 ${before} → ${after} · 받는 가치 ${gain > 0 ? '+' : ''}${gain}${cardsIn || cardsOut ? ` · 카드 가치 들어옴 ${cardsIn}, 나감 ${cardsOut}` : ''}`,
   trust: (n: number) => `신뢰 ${n > 0 ? '+' : ''}${n}`,
   reasons: { stalled: '응답이 오지 않아 무산됐어요.', expired: '시즌이 바뀌어 승인 기회가 지났어요.', control: '그사이 학교 운영이 바뀌어 무산됐어요.' } as Record<string, string>,
   ruleFailed: (codes: string) => `규칙에 막혀 무산됐어요 (${codes}).`,

@@ -40,6 +40,7 @@ import { boxLines, finishPlayoffs, listGames, playoffsView, recordScore, seasonB
 import { addScheduledGame, clearRound, fillRound, flipScheduledGame, removeScheduledGame, scheduleInfo, scheduleOptions } from '@data/schedule'
 import { addPlayedGame, closeSession, playedPairs } from '@data/played'
 import { forgetLore } from '@story/context'
+import { tradeIsBlockbuster } from '@sim/gm'
 import type { AppContext } from './context'
 import { listBackups } from './backup'
 import { AppError } from './errors'
@@ -470,9 +471,13 @@ export function createHandlers(deps: HandlerDeps): Handlers {
       return engine(() => previewTrade(d, parse(tradeItemsSchema, items, 'trade') as TradeItem[]))
     },
     'trades.apply': (slug, items, note) => {
-      const d = db(slug)
+      const s = parse(slugSchema, slug, 'slug')
+      const d = ctx().leagues.dbFor(s)
       const parsed = parse(tradeItemsSchema, items, 'trade') as TradeItem[]
-      return { tradeId: engine(() => applyTrade(d, parsed, 'user', parse(z.string().max(500), note, 'note'))) }
+      const text = parse(z.string().max(500), note, 'note')
+      // A trade that moves a star is tagged for the story engine, read before the rosters change.
+      const blockbuster = tradeIsBlockbuster(d, ctx().leagues.folderOf(s), parsed)
+      return { tradeId: engine(() => applyTrade(d, parsed, 'user', text, blockbuster ? { blockbuster } : undefined)) }
     },
     'trades.veto': (slug, tradeId) => guarded(slug, 'veto', (d) => vetoTrade(d, parse(idSchema, tradeId, 'trade'))),
     'trades.list': (slug, seasonId) => {

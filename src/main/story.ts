@@ -25,7 +25,6 @@ import { seedWiki, syncSchoolCategories, upgradeWiki } from '@story/wiki'
 import { refuse } from '@data/rules'
 import {
   chatterInput,
-  describeEvent,
   LIVE_DRAFT_START,
   liveCommentsInput,
   ensureCast,
@@ -37,7 +36,7 @@ import {
   roundUpInput,
   type League,
 } from '@story/context'
-import { roundTop, roundWikiInput, WIKI_EDITS, WIKI_PRIORITY, wikiEditInput, type ContestedEdit, type WikiEditInput } from '@story/wikiEdits'
+import { roundTop, roundWikiInput, tradeWikiInput, WIKI_EDITS, WIKI_PRIORITY, type ContestedEdit, type WikiEditInput } from '@story/wikiEdits'
 import { batches, planPlayerPages, playerPagesInput, WIKI_PLAYER, WIKI_PLAYER_PRIORITY } from '@story/wikiPlayer'
 import type { PlayerPagesPlan, PlayerPagesStatus } from '@shared/wiki'
 import {
@@ -283,12 +282,10 @@ export class StoryService {
     } catch (e) {
       console.warn('[story] could not queue player reactions', e)
     }
-    // Wiki editors note trades on the players' and schools' pages.
+    // Wiki editors note trades on the players' and schools' pages (a blockbuster in its star's 역사 too).
     for (const e of events.filter((x) => x.type === 'trade_applied')) {
       try {
-        const p = e.payload as { teams: string[]; players: string[] }
-        const fact = describeEvent(league, e)?.text
-        if (fact && this.queueWiki(slug, db, folder, wikiEditInput(league, { players: p.players, teams: p.teams }, [fact], `trade:${e.id}`))) queued++
+        if (this.queueWiki(slug, db, folder, tradeWikiInput(league, e))) queued++
       } catch (err) {
         console.warn('[story] could not queue wiki edits', err)
       }

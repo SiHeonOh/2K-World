@@ -125,13 +125,15 @@ export function previewTrade(db: Db, items: TradeItem[]) {
 /**
  * Records a legal trade: players move (with their new slots), cards change
  * hands, and player moves go on the 2K checklist. Throws RuleError if illegal.
+ * `tags` go into the trade_applied event: a GM deal's negotiation, gap and
+ * lopsided tag, and (any trade's) the blockbuster tag.
  */
 export function applyTrade(
   db: Db,
   items: TradeItem[],
   source: 'user' | 'gm' = 'user',
   note = '',
-  gm?: { negotiationId: number; valueGap: number; lopsided: boolean },
+  tags?: { negotiationId?: number; valueGap?: number; lopsided?: boolean; blockbuster?: boolean },
 ): number {
   const season = currentSeason(db)
   const check = checkTrade(items, tradeContext(db))
@@ -166,11 +168,27 @@ export function applyTrade(
     appendEvent(
       db,
       'trade_applied',
-      { tradeId, teams, players: check.moves.map((m) => m.playerId), cards: cards.map((c) => c.cardId), ...(gm ?? {}) },
+      { tradeId, teams, players: check.moves.map((m) => m.playerId), cards: cards.map((c) => c.cardId), ...(tags ?? {}) },
       season.id,
     )
     return tradeId
   })
+}
+
+/**
+ * The players each of a season's blockbuster trades moved (vetoed ones
+ * left out), oldest first: what a new trade must outdo to be one past the
+ * season's first few (isBlockbuster).
+ */
+export function seasonBlockbusters(db: Db, seasonId = currentSeason(db).id): string[][] {
+  const rows = db
+    .prepare(
+      `SELECT e.payload FROM events e JOIN trades t ON t.id = ${jsonField('e.payload', '$.tradeId')}
+       WHERE e.type = 'trade_applied' AND e.season_id = ? AND t.status = 'applied' AND ${jsonField('e.payload', '$.blockbuster')} = 1
+       ORDER BY e.id`,
+    )
+    .all(seasonId) as { payload: string }[]
+  return rows.map((r) => (JSON.parse(r.payload) as EventPayloads['trade_applied']).players)
 }
 
 /**
